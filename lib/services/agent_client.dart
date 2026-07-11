@@ -2,11 +2,13 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../models/alert_item.dart';
 import '../models/host_metrics.dart';
 
 /// Клиент агента на целевой машине.
 ///   GET  /health   — доступность (без токена)
 ///   GET  /metrics  — метрики (Bearer-токен)
+///   GET  /alerts   — превышенные пороги cpu/ram/disk/temperature (Bearer-токен)
 ///   POST /wake     — ретрансляция magic-пакета (Bearer-токен)
 class AgentClient {
   AgentClient({http.Client? client}) : _client = client ?? http.Client();
@@ -48,6 +50,27 @@ class AgentClient {
       return HostMetrics.offline();
     } catch (_) {
       return HostMetrics.offline();
+    }
+  }
+
+  Future<List<AlertItem>> alerts(
+    String host,
+    int port,
+    String token, {
+    Duration timeout = const Duration(seconds: 4),
+  }) async {
+    try {
+      final res = await _client.get(
+        _uri(host, port, '/alerts'),
+        headers: {'Authorization': 'Bearer $token'},
+      ).timeout(timeout);
+
+      if (res.statusCode != 200) return const [];
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final list = (body['alerts'] as List?) ?? const [];
+      return list.cast<Map<String, dynamic>>().map(AlertItem.fromJson).toList();
+    } catch (_) {
+      return const [];
     }
   }
 

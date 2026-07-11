@@ -1,13 +1,16 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:record/record.dart';
 
 /// Визуализатор голоса. Полосы сдвигаются справа налево: новая амплитуда
 /// входит с правого края. Когда неактивен — ровная тихая линия.
 ///
-/// Источник амплитуды сейчас синтетический (_sample). Реальная версия
-/// заменит его на RMS из микрофонного потока — форма виджета не изменится.
+/// Амплитуда — RMS из PCM16-потока микрофона (пакет `record`). Без
+/// разрешения на запись или на неподдерживаемой платформе остаётся тихая
+/// линия — вызывающий код уже блокирует запуск прослушивания при !isConnected.
 class Waveform extends StatefulWidget {
   const Waveform({
     super.key,
@@ -27,7 +30,8 @@ class Waveform extends StatefulWidget {
 class _WaveformState extends State<Waveform> {
   static const _idle = 0.08;
   late List<double> _levels;
-  Timer? _timer;
+  final _recorder = AudioRecorder();
+  StreamSubscription<Uint8List>? _sub;
 
   @override
   void initState() {
@@ -43,30 +47,52 @@ class _WaveformState extends State<Waveform> {
   }
 
   void _maybeStart() {
-    _timer?.cancel();
+    unawaited(_sub?.cancel());
+    _sub = null;
     final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     if (!widget.active || reduceMotion) {
       setState(() => _levels = List.filled(widget.barCount, _idle));
+      unawaited(_recorder.stop());
       return;
     }
-    _timer = Timer.periodic(const Duration(milliseconds: 80), (_) {
-      final amp = _sample(DateTime.now().millisecondsSinceEpoch) * widget.sensitivity;
-      setState(() {
-        _levels = [..._levels.skip(1), max(_idle, amp.clamp(0.0, 1.0))];
-      });
+    unawaited(_startStream());
+  }
+
+  Future<void> _startStream() async {
+    if (!await _recorder.hasPermission()) {
+      if (mounted) setState(() => _levels = List.filled(widget.barCount, _idle));
+      return;
+    }
+    final stream = await _recorder.startStream(
+      const RecordConfig(encoder: AudioEncoder.pcm16bits, sampleRate: 16000, numChannels: 1),
+    );
+    _sub = stream.listen(_onChunk);
+  }
+
+  void _onChunk(Uint8List chunk) {
+    if (!mounted) return;
+    final amp = (_rms(chunk) * widget.sensitivity).clamp(0.0, 1.0);
+    setState(() {
+      _levels = [..._levels.skip(1), max(_idle, amp)];
     });
   }
 
-  double _sample(int t) {
-    final slow = sin(t / 380) * 0.3 + 0.45;
-    final fast = sin(t / 90) * 0.18;
-    final jitter = (sin(t * 12.9898) * 43758.5453) % 1;
-    return (slow + fast + jitter.abs() * 0.15).clamp(_idle, 1.0);
+  double _rms(Uint8List bytes) {
+    final sampleCount = bytes.length ~/ 2;
+    if (sampleCount == 0) return 0;
+    final data = ByteData.sublistView(bytes);
+    var sumSquares = 0.0;
+    for (var i = 0; i < sampleCount; i++) {
+      final sample = data.getInt16(i * 2, Endian.little) / 32768;
+      sumSquares += sample * sample;
+    }
+    return sqrt(sumSquares / sampleCount);
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    unawaited(_sub?.cancel());
+    unawaited(_recorder.dispose());
     super.dispose();
   }
 

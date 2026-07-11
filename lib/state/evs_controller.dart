@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../core/id.dart';
 import '../services/prefs_store.dart';
@@ -14,9 +16,9 @@ class EvsCommand {
   final DateTime at;
 }
 
-/// Состояние связи с десктопным EVS. Пока сторона ПК не готова —
-/// подключение имитируется. Реальная версия откроет WebSocket
-/// (package:web_socket_channel) на ws://host:port/mobile.
+/// Состояние связи с десктопным EVS через WebSocket (ws://host:port/mobile).
+/// Формат сообщений провизорный — {"type": "command"|"recognized", "text": ...} —
+/// и финализируется вместе с функцией приёма на стороне десктопного EVS.
 class EvsController extends ChangeNotifier {
   EvsController(this._store);
 
@@ -28,7 +30,9 @@ class EvsController extends ChangeNotifier {
   bool _autoStart = false;
   String? _error;
   final List<EvsCommand> _history = [];
-  Timer? _timer;
+  WebSocketChannel? _channel;
+  StreamSubscription? _sub;
+  int _connectAttempt = 0;
 
   EvsStatus get status => _status;
   String get host => _host;
@@ -64,31 +68,96 @@ class EvsController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void connect() {
-    _error = null;
+  Future<void> connect() async {
+    if (_host.trim().isEmpty) {
+      _status = EvsStatus.error;
+      _error = 'Укажите адрес сервера EVS';
+      notifyListeners();
+      return;
+    }
+
+    final port = int.tryParse(_port);
+    if (port == null) {
+      _status = EvsStatus.error;
+      _error = 'Некорректный порт';
+      notifyListeners();
+      return;
+    }
+
+    await _teardown();
+
     _status = EvsStatus.connecting;
+    _error = null;
     notifyListeners();
 
-    _timer?.cancel();
-    _timer = Timer(const Duration(milliseconds: 1200), () {
-      if (_host.trim().isEmpty) {
-        _status = EvsStatus.error;
-        _error = 'Укажите адрес сервера EVS';
-      } else {
-        _status = EvsStatus.connected;
+    final attempt = _connectAttempt;
+    final uri = Uri.parse('ws://$_host:$port/mobile');
+
+    try {
+      final channel = WebSocketChannel.connect(uri);
+      await channel.ready;
+      if (attempt != _connectAttempt) {
+        unawaited(channel.sink.close());
+        return;
       }
+      _channel = channel;
+      _status = EvsStatus.connected;
       notifyListeners();
-    });
+
+      _sub = channel.stream.listen(
+        _handleMessage,
+        onError: (_) => _fail(attempt, 'Обрыв связи с EVS'),
+        onDone: () => _fail(attempt, null),
+      );
+    } catch (_) {
+      if (attempt != _connectAttempt) return;
+      _status = EvsStatus.error;
+      _error = 'Не удалось подключиться к EVS';
+      notifyListeners();
+    }
+  }
+
+  void _fail(int attempt, String? message) {
+    if (attempt != _connectAttempt) return;
+    _status = message == null ? EvsStatus.disconnected : EvsStatus.error;
+    _error = message;
+    notifyListeners();
+  }
+
+  void _handleMessage(dynamic raw) {
+    if (raw is! String) return;
+    try {
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      final text = data['text'] as String?;
+      if (data['type'] == 'recognized' && text != null) {
+        _addHistory(text);
+      }
+    } catch (_) {
+      // Не JSON или неизвестный формат — игнорируем, пока протокол не финализирован.
+    }
+  }
+
+  Future<void> _teardown() async {
+    _connectAttempt++;
+    await _sub?.cancel();
+    _sub = null;
+    await _channel?.sink.close();
+    _channel = null;
   }
 
   void disconnect() {
-    _timer?.cancel();
+    unawaited(_teardown());
     _status = EvsStatus.disconnected;
     _error = null;
     notifyListeners();
   }
 
   void pushCommand(String text) {
+    _addHistory(text);
+    _channel?.sink.add(jsonEncode({'type': 'command', 'text': text}));
+  }
+
+  void _addHistory(String text) {
     _history.insert(0, EvsCommand(text));
     if (_history.length > 10) _history.removeRange(10, _history.length);
     notifyListeners();
@@ -96,7 +165,7 @@ class EvsController extends ChangeNotifier {
 
   @override
   void dispose() {
-    _timer?.cancel();
+    unawaited(_teardown());
     super.dispose();
   }
 }

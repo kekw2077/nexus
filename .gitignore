@@ -13,6 +13,10 @@ pubspec.lock
 .vscode/
 *.iml
 
+# Python (agent slim.py)
+__pycache__/
+*.pyc
+
 # Android
 android/.gradle/
 android/local.properties

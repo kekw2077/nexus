@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../core/id.dart';
+import '../models/alert_item.dart';
 import '../models/host_metrics.dart';
 import '../models/monitored_host.dart';
 import '../services/agent_client.dart';
@@ -20,6 +21,7 @@ class MonitorController extends ChangeNotifier {
 
   final List<MonitoredHost> _hosts = [];
   final Map<String, HostMetrics> _metrics = {};
+  final Map<String, List<AlertItem>> _alerts = {};
   final Set<String> _booting = {};
   Timer? _poll;
   bool _refreshing = false;
@@ -31,6 +33,8 @@ class MonitorController extends ChangeNotifier {
     if (_booting.contains(id)) return HostMetrics.booting();
     return _metrics[id] ?? HostMetrics.unknown();
   }
+
+  List<AlertItem> alertsFor(String id) => _alerts[id] ?? const [];
 
   int get onlineCount => _hosts.where((h) => _metrics[h.id]?.isOnline ?? false).length;
 
@@ -66,6 +70,9 @@ class MonitorController extends ChangeNotifier {
       if (_booting.contains(host.id)) continue; // загрузку отслеживает отдельный watcher
       final result = await _agent.metrics(host.host, host.port, host.token);
       _metrics[host.id] = result;
+      _alerts[host.id] = result.isOnline
+          ? await _agent.alerts(host.host, host.port, host.token)
+          : const [];
     }
     notifyListeners();
   }
@@ -128,6 +135,7 @@ class MonitorController extends ChangeNotifier {
   void remove(String id) {
     _hosts.removeWhere((h) => h.id == id);
     _metrics.remove(id);
+    _alerts.remove(id);
     _booting.remove(id);
     _persist();
     notifyListeners();

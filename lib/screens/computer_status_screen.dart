@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../core/format.dart';
 import '../core/theme.dart';
+import '../models/alert_item.dart';
 import '../models/host_metrics.dart';
 import '../models/monitored_host.dart';
 import '../state/monitor_controller.dart';
@@ -105,6 +106,7 @@ class ComputerStatusScreen extends StatelessWidget {
                   _StatusCard(
                     host: host,
                     metrics: monitor.metricsFor(host.id),
+                    alerts: monitor.alertsFor(host.id),
                     onWake: host.canWake ? () => _wake(context, host) : null,
                     onEdit: () => _openForm(context, existing: host),
                     onDelete: () {
@@ -129,6 +131,7 @@ class _StatusCard extends StatelessWidget {
   const _StatusCard({
     required this.host,
     required this.metrics,
+    required this.alerts,
     required this.onWake,
     required this.onEdit,
     required this.onDelete,
@@ -136,6 +139,7 @@ class _StatusCard extends StatelessWidget {
 
   final MonitoredHost host;
   final HostMetrics metrics;
+  final List<AlertItem> alerts;
   final VoidCallback? onWake;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -182,9 +186,53 @@ class _StatusCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            if (online) _Metrics(metrics: metrics) else _Placeholder(state: metrics.state),
+            if (online) ...[
+              if (alerts.isNotEmpty) ...[
+                _AlertsBanner(alerts: alerts),
+                const SizedBox(height: 12),
+              ],
+              _Metrics(metrics: metrics),
+            ] else
+              _Placeholder(state: metrics.state),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _AlertsBanner extends StatelessWidget {
+  const _AlertsBanner({required this.alerts});
+  final List<AlertItem> alerts;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = Theme.of(context).extension<StatusColors>()!;
+    final scheme = Theme.of(context).colorScheme;
+    final color = alerts.any((a) => a.level == AlertLevel.critical) ? scheme.error : status.warning;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final alert in alerts)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.warning_amber_rounded, size: 15, color: color),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(alert.message, style: TextStyle(fontSize: 13, color: color))),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }
