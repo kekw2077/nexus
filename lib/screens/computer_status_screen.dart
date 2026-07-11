@@ -1,0 +1,411 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../core/format.dart';
+import '../core/theme.dart';
+import '../models/host_metrics.dart';
+import '../models/monitored_host.dart';
+import '../state/monitor_controller.dart';
+import '../state/settings_controller.dart';
+import '../widgets/computer_form_sheet.dart';
+
+class ComputerStatusScreen extends StatelessWidget {
+  const ComputerStatusScreen({super.key});
+
+  Future<void> _openForm(BuildContext context, {MonitoredHost? existing}) async {
+    final monitor = context.read<MonitorController>();
+    final result = await ComputerFormSheet.show(
+      context,
+      title: existing == null ? 'Добавить компьютер' : 'Изменить компьютер',
+      hostLabel: 'Адрес хоста',
+      hostHint: 'server.ваш-tailnet.ts.net',
+      submitLabel: existing == null ? 'Добавить' : 'Сохранить',
+      withToken: true,
+      withMac: true,
+      macOptional: true,
+      defaultPort: 8765,
+      initial: existing == null
+          ? null
+          : ComputerFormResult(
+              name: existing.name,
+              host: existing.host,
+              port: existing.port,
+              token: existing.token,
+              mac: existing.mac,
+            ),
+    );
+    if (result == null) return;
+
+    final broadcast = result.mac != null ? '255.255.255.255' : null;
+    if (existing == null) {
+      monitor.add(
+        name: result.name,
+        host: result.host,
+        port: result.port,
+        token: result.token ?? '',
+        mac: result.mac,
+        broadcast: broadcast,
+      );
+      _toast(context, '${result.name} добавлен в мониторинг');
+    } else {
+      monitor.update(
+        existing.id,
+        name: result.name,
+        host: result.host,
+        port: result.port,
+        token: result.token ?? '',
+        mac: result.mac,
+        broadcast: result.mac != null ? (existing.broadcast ?? '255.255.255.255') : null,
+      );
+      _toast(context, '${result.name} сохранён');
+    }
+  }
+
+  Future<void> _wake(BuildContext context, MonitoredHost host) async {
+    final monitor = context.read<MonitorController>();
+    final relay = context.read<SettingsController>().relay;
+    final error = await monitor.wakeAndWatch(host, relay: relay);
+    if (!context.mounted) return;
+    _toast(context, error ?? 'Включаем ${host.name}…');
+  }
+
+  void _toast(BuildContext context, String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final monitor = context.watch<MonitorController>();
+    final hosts = monitor.hosts;
+
+    return Scaffold(
+      body: hosts.isEmpty
+          ? _Empty(onAdd: () => _openForm(context))
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 88),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        onPressed: monitor.isRefreshing ? null : monitor.refresh,
+                        icon: monitor.isRefreshing
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.refresh),
+                        tooltip: 'Обновить',
+                      ),
+                    ],
+                  ),
+                ),
+                for (final host in hosts) ...[
+                  _StatusCard(
+                    host: host,
+                    metrics: monitor.metricsFor(host.id),
+                    onWake: host.canWake ? () => _wake(context, host) : null,
+                    onEdit: () => _openForm(context, existing: host),
+                    onDelete: () {
+                      monitor.remove(host.id);
+                      _toast(context, '${host.name} удалён');
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                _SummaryCard(total: hosts.length, online: monitor.onlineCount),
+              ],
+            ),
+      floatingActionButton: hosts.isEmpty
+          ? null
+          : FloatingActionButton(onPressed: () => _openForm(context), child: const Icon(Icons.add)),
+    );
+  }
+}
+
+
+class _StatusCard extends StatelessWidget {
+  const _StatusCard({
+    required this.host,
+    required this.metrics,
+    required this.onWake,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final MonitoredHost host;
+  final HostMetrics metrics;
+  final VoidCallback? onWake;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final online = metrics.state == HostState.online;
+    const mono = TextStyle(fontFamilyFallback: monoFontFallback, fontSize: 12);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.monitor, size: 20, color: scheme.onSurface),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(host.name, style: Theme.of(context).textTheme.titleMedium, overflow: TextOverflow.ellipsis),
+                      Text('${host.host}:${host.port}', style: mono.copyWith(color: scheme.onSurfaceVariant)),
+                    ],
+                  ),
+                ),
+                _StateBadge(state: metrics.state),
+                if (onWake != null)
+                  IconButton(
+                    onPressed: metrics.state == HostState.booting ? null : onWake,
+                    icon: const Icon(Icons.power_settings_new),
+                    tooltip: 'Включить',
+                  ),
+                PopupMenuButton<String>(
+                  onSelected: (v) => v == 'edit' ? onEdit() : onDelete(),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit), title: Text('Изменить'), contentPadding: EdgeInsets.zero)),
+                    PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline), title: Text('Удалить'), contentPadding: EdgeInsets.zero)),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (online) _Metrics(metrics: metrics) else _Placeholder(state: metrics.state),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Metrics extends StatelessWidget {
+  const _Metrics({required this.metrics});
+  final HostMetrics metrics;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.timelapse, size: 14, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 6),
+            Text('Работает ${formatUptime(metrics.uptimeSec)}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _MetricBar(icon: Icons.memory, label: 'Процессор', value: metrics.cpu),
+        const SizedBox(height: 10),
+        _MetricBar(icon: Icons.dashboard, label: 'Память', value: metrics.ram),
+        const SizedBox(height: 10),
+        _MetricBar(icon: Icons.sd_storage, label: 'Диск', value: metrics.disk),
+        if (metrics.hasTemperature) ...[
+          const Divider(height: 24),
+          Row(
+            children: [
+              Icon(Icons.device_thermostat, size: 16, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 8),
+              const Text('Температура'),
+              const Spacer(),
+              Text(
+                '${metrics.temperature.toStringAsFixed(0)}°C',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: metrics.temperature >= 70
+                      ? Theme.of(context).extension<StatusColors>()!.warning
+                      : scheme.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _MetricBar extends StatelessWidget {
+  const _MetricBar({required this.icon, required this.label, required this.value});
+
+  final IconData icon;
+  final String label;
+  final int value;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final warning = Theme.of(context).extension<StatusColors>()!.warning;
+    final hot = value >= 80;
+    return Column(
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 15, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Text(label, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13)),
+            const Spacer(),
+            Text('$value%',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: hot ? warning : scheme.onSurface,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                )),
+          ],
+        ),
+        const SizedBox(height: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: value / 100,
+            minHeight: 6,
+            backgroundColor: scheme.surfaceContainerHighest,
+            valueColor: AlwaysStoppedAnimation(hot ? warning : scheme.primary),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Placeholder extends StatelessWidget {
+  const _Placeholder({required this.state});
+  final HostState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = switch (state) {
+      HostState.booting => 'Включается, ждём ответа…',
+      HostState.unknown => 'Опрашиваем агент…',
+      _ => 'Агент не отвечает',
+    };
+    return Row(
+      children: [
+        if (state == HostState.booting) ...[
+          const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+          const SizedBox(width: 10),
+        ],
+        Text(text, style: TextStyle(color: scheme.onSurfaceVariant)),
+      ],
+    );
+  }
+}
+
+class _StateBadge extends StatelessWidget {
+  const _StateBadge({required this.state});
+  final HostState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = Theme.of(context).extension<StatusColors>()!;
+    final scheme = Theme.of(context).colorScheme;
+
+    final (Color bg, Color fg, IconData icon, String label) = switch (state) {
+      HostState.online => (status.success, status.onSuccess, Icons.wifi, 'Онлайн'),
+      HostState.booting => (status.warning, Colors.white, Icons.hourglass_top, 'Загрузка'),
+      HostState.offline => (scheme.surfaceContainerHighest, scheme.onSurfaceVariant, Icons.wifi_off, 'Оффлайн'),
+      HostState.unknown => (scheme.surfaceContainerHighest, scheme.onSurfaceVariant, Icons.help_outline, 'Проверка'),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: fg),
+          const SizedBox(width: 4),
+          Text(label, style: TextStyle(color: fg, fontSize: 12, fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryCard extends StatelessWidget {
+  const _SummaryCard({required this.total, required this.online});
+  final int total;
+  final int online;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final success = Theme.of(context).extension<StatusColors>()!.success;
+
+    Widget cell(String label, String value, Color color) => Expanded(
+          child: Column(
+            children: [
+              Text(label, style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
+              const SizedBox(height: 2),
+              Text(value,
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  )),
+            ],
+          ),
+        );
+
+    return Card(
+      color: scheme.primary.withValues(alpha: 0.08),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 18),
+        child: Row(
+          children: [
+            cell('Всего', '$total', scheme.onSurface),
+            cell('Онлайн', '$online', success),
+            cell('Оффлайн', '${total - online}', scheme.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Empty extends StatelessWidget {
+  const _Empty({required this.onAdd});
+  final VoidCallback onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.monitor, size: 48, color: scheme.onSurfaceVariant.withValues(alpha: 0.4)),
+            const SizedBox(height: 16),
+            Text('Нечего отслеживать', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(
+              'Укажите адрес компьютера с запущенным агентом, чтобы видеть его нагрузку',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 20),
+            FilledButton(onPressed: onAdd, child: const Text('Добавить компьютер')),
+          ],
+        ),
+      ),
+    );
+  }
+}

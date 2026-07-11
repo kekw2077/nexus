@@ -1,0 +1,18 @@
+<!-- Вставьте эти ключи внутрь корневого <dict> файла ios/Runner/Info.plist -->
+
+<!-- Агент отвечает по http:// (LAN и Tailscale), а не https. Без этого iOS
+     заблокирует запросы. Для дома достаточно разрешить любые загрузки;
+     при желании сузьте до конкретных доменов. -->
+<key>NSAppTransportSecurity</key>
+<dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+</dict>
+
+<!-- iOS 14+ требует объяснение доступа к локальной сети (UDP WoL, LAN-агенты) -->
+<key>NSLocalNetworkUsageDescription</key>
+<string>Для управления компьютерами в вашей локальной сети</string>
+
+<!-- Понадобится позже для голосового ввода EVS -->
+<key>NSMicrophoneUsageDescription</key>
+<string>Для голосового управления через EVS</string>
