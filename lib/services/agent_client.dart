@@ -45,9 +45,9 @@ class AgentClient {
       }
       // 401 и прочее трактуем как «недоступна» — детали в state не помещаются,
       // но неверный токен виден по тому, что онлайновый хост не отдаёт метрики.
-      return const HostMetrics.offline();
+      return HostMetrics.offline();
     } catch (_) {
-      return const HostMetrics.offline();
+      return HostMetrics.offline();
     }
   }
 

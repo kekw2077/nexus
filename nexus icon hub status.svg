@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Nexus icon — hub status">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#111A2E"/><stop offset="1" stop-color="#080D1A"/></linearGradient>
+    <radialGradient id="glow" cx="50%" cy="46%" r="62%"><stop offset="0" stop-color="#22345E" stop-opacity=".9"/><stop offset="1" stop-color="#22345E" stop-opacity="0"/></radialGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4EE3D2"/><stop offset=".5" stop-color="#4C7DF0"/><stop offset="1" stop-color="#8B6CF0"/></linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/><rect width="1024" height="1024" rx="224" fill="url(#glow)"/>
+  <g stroke-width="14" stroke-opacity=".55" stroke-linecap="round">
+    <line x1="512" y1="512" x2="512" y2="222" stroke="#FFB454" stroke-opacity=".7"/>
+    <line x1="512" y1="512" x2="763" y2="367" stroke="url(#accent)"/>
+    <line x1="512" y1="512" x2="763" y2="657" stroke="url(#accent)"/>
+    <line x1="512" y1="512" x2="512" y2="802" stroke="url(#accent)"/>
+    <line x1="512" y1="512" x2="261" y2="657" stroke="url(#accent)"/>
+    <line x1="512" y1="512" x2="261" y2="367" stroke="url(#accent)"/>
+  </g>
+  <polygon points="512,222 763,367 763,657 512,802 261,657 261,367" fill="none" stroke="url(#accent)" stroke-width="10" stroke-opacity=".28" stroke-linejoin="round"/>
+  <g fill="#DCE9FF">
+    <circle cx="763" cy="367" r="32"/><circle cx="763" cy="657" r="32"/><circle cx="512" cy="802" r="32"/><circle cx="261" cy="657" r="32"/><circle cx="261" cy="367" r="32"/>
+  </g>
+  <circle cx="512" cy="222" r="48" fill="none" stroke="#FFB454" stroke-opacity=".35" stroke-width="10"/>
+  <circle cx="512" cy="222" r="34" fill="#FFB454"/>
+  <circle cx="512" cy="512" r="78" fill="url(#accent)"/>
+  <circle cx="512" cy="512" r="78" fill="none" stroke="#EAF3FF" stroke-opacity=".25" stroke-width="6"/>
+</svg>

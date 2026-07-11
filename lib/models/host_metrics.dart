@@ -3,7 +3,7 @@
 enum HostState { online, offline, booting, unknown }
 
 class HostMetrics {
-  const HostMetrics({
+  HostMetrics({
     required this.state,
     this.cpu = 0,
     this.ram = 0,
@@ -37,11 +37,11 @@ class HostMetrics {
 
   bool get isOnline => state == HostState.online;
 
-  const HostMetrics.offline() : this._simple(HostState.offline);
-  const HostMetrics.unknown() : this._simple(HostState.unknown);
-  const HostMetrics.booting() : this._simple(HostState.booting);
+  HostMetrics.offline() : this._simple(HostState.offline);
+  HostMetrics.unknown() : this._simple(HostState.unknown);
+  HostMetrics.booting() : this._simple(HostState.booting);
 
-  const HostMetrics._simple(this.state)
+  HostMetrics._simple(this.state)
       : cpu = 0,
         ram = 0,
         disk = 0,

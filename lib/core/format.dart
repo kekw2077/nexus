@@ -36,7 +36,10 @@ String formatBytes(int bytes) {
     value /= 1024;
     unit++;
   }
-  final rounded = value >= 100 || unit == 0 ? value.round().toString() : value.toStringAsFixed(1);
+  final isWhole = value == value.roundToDouble();
+  final rounded = value >= 100 || unit == 0 || isWhole
+      ? value.round().toString()
+      : value.toStringAsFixed(1);
   return '$rounded ${units[unit]}';
 }
 

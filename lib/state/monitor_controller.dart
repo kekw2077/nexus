@@ -28,8 +28,8 @@ class MonitorController extends ChangeNotifier {
   bool get isRefreshing => _refreshing;
 
   HostMetrics metricsFor(String id) {
-    if (_booting.contains(id)) return const HostMetrics.booting();
-    return _metrics[id] ?? const HostMetrics.unknown();
+    if (_booting.contains(id)) return HostMetrics.booting();
+    return _metrics[id] ?? HostMetrics.unknown();
   }
 
   int get onlineCount => _hosts.where((h) => _metrics[h.id]?.isOnline ?? false).length;
@@ -168,7 +168,7 @@ class MonitorController extends ChangeNotifier {
       if (DateTime.now().isAfter(deadline)) {
         timer.cancel();
         _booting.remove(host.id);
-        _metrics[host.id] = const HostMetrics.offline();
+        _metrics[host.id] = HostMetrics.offline();
         notifyListeners();
         return;
       }
