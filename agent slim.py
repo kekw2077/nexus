@@ -5,9 +5,10 @@ PC Agent — метрики Ubuntu + ретранслятор Wake-on-LAN.
 
     GET  /health          без токена, "жив ли хост"
     GET  /metrics         cpu / ram / disk / temperature / uptimeSec
-    GET  /alerts          проблемы хоста: пороги cpu/ram/disk/temperature превышены
+    GET  /alerts          проблемы хоста (машина + Nextcloud) — пороги превышены
     GET  /alert-config    текущие пороги + топик ntfy для этого хоста
     PUT  /alert-config    задать пороги/топик с телефона — источник истины телефон
+    GET  /nextcloud       состояние Nextcloud (status.php + serverinfo), если настроен
     POST /wake            {"mac": "00:1A:2B:3C:4D:5E", "broadcast": "192.168.1.255"}
 
 Запуск:
@@ -18,6 +19,15 @@ Push-уведомления об алертах (опционально): зад
 поток раз в PC_AGENT_WATCH_INTERVAL секунд (по умолчанию 10) проверяет
 алерты и публикует push в топик, заданный через PUT /alert-config
 (поле ntfyTopic). Без PC_AGENT_NTFY_URL или ntfyTopic поток не запускается.
+
+Мониторинг Nextcloud (опционально): задайте PC_AGENT_NC_URL (адрес облака,
+например https://cloud.example.com) — фоновый поток раз в PC_AGENT_NC_INTERVAL
+секунд (по умолчанию 60) читает /status.php (без авторизации) и, если задан
+PC_AGENT_NC_TOKEN (токен приложения serverinfo), подробную статистику через
+serverinfo API. Состояние отдаётся в /nextcloud, а проблемы (недоступно,
+режим обслуживания, нужен апгрейд БД, есть обновления) добавляются в /alerts
+и пушатся тем же watcher'ом. Учётные данные Nextcloud остаются на сервере,
+в телефон не передаются.
 """
 
 from __future__ import annotations
@@ -45,6 +55,10 @@ ALERT_DISK = int(os.environ.get("PC_AGENT_ALERT_DISK", "90"))
 ALERT_TEMP = float(os.environ.get("PC_AGENT_ALERT_TEMP", "85"))
 
 STATE_PATH = Path(os.environ.get("PC_AGENT_STATE_FILE", "pc-agent-config.json"))
+
+NC_URL = os.environ.get("PC_AGENT_NC_URL", "").rstrip("/")
+NC_TOKEN = os.environ.get("PC_AGENT_NC_TOKEN", "")
+NC_INTERVAL = int(os.environ.get("PC_AGENT_NC_INTERVAL", "60"))
 
 if not TOKEN:
     raise SystemExit(
@@ -247,6 +261,130 @@ def compute_alerts(m: dict[str, object]) -> list[dict[str, str]]:
 
 
 # --------------------------------------------------------------------------
+# Nextcloud: фоновый опрос status.php + serverinfo, кэш состояния, свои алерты
+# --------------------------------------------------------------------------
+
+_nc_lock = threading.Lock()
+# reachable=True на старте, чтобы не поднять ложный алерт «недоступно» до
+# первого реального опроса; поток заменит его фактическим значением.
+_nc_state: dict[str, object] = {"configured": bool(NC_URL), "reachable": True, "hasServerinfo": False}
+
+
+def get_nc_state() -> dict[str, object]:
+    with _nc_lock:
+        return dict(_nc_state)
+
+
+def _http_get_json(url: str, headers: dict[str, str] | None = None, timeout: int = 8) -> dict:
+    import urllib.request
+
+    req = urllib.request.Request(url, headers=headers or {}, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
+def fetch_nextcloud() -> dict[str, object]:
+    """Собирает состояние Nextcloud. status.php — без авторизации (доступность,
+    режим обслуживания, версия). serverinfo — по токену приложения serverinfo
+    (подробности: пользователи, файлы, шары, свободное место, обновления)."""
+    state: dict[str, object] = {"configured": True, "reachable": False, "hasServerinfo": False}
+
+    try:
+        status = _http_get_json(f"{NC_URL}/status.php")
+    except (OSError, ValueError):
+        return state  # облако недоступно — reachable остаётся False
+
+    state["reachable"] = bool(status.get("installed", False))
+    state["maintenance"] = bool(status.get("maintenance", False))
+    state["needsDbUpgrade"] = bool(status.get("needsDbUpgrade", False))
+    state["version"] = status.get("versionstring") or status.get("version")
+    state["productName"] = status.get("productname") or "Nextcloud"
+
+    if not NC_TOKEN:
+        return state  # только status.php, без подробной статистики
+
+    try:
+        info = _http_get_json(
+            f"{NC_URL}/ocs/v2.php/apps/serverinfo/api/v1/info?format=json&token={NC_TOKEN}",
+            headers={"OCS-APIRequest": "true", "Accept": "application/json"},
+        )
+        data = info["ocs"]["data"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return state  # токен неверный/приложение выключено — остаёмся на status.php
+
+    # Структура serverinfo немного меняется между версиями NC — читаем защищённо.
+    nc = data.get("nextcloud", {}) if isinstance(data, dict) else {}
+    system = nc.get("system", {}) if isinstance(nc, dict) else {}
+    storage = nc.get("storage", {}) if isinstance(nc, dict) else {}
+    shares = nc.get("shares", {}) if isinstance(nc, dict) else {}
+    active = data.get("activeUsers", {}) if isinstance(data, dict) else {}
+    apps = system.get("apps", {}) if isinstance(system, dict) else {}
+
+    def _int(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+    state["hasServerinfo"] = True
+    state["activeUsers"] = {
+        "last5min": _int(active.get("last5minutes")),
+        "last1hour": _int(active.get("last1hour")),
+        "last24hours": _int(active.get("last24hours")),
+    }
+    state["numUsers"] = _int(storage.get("num_users"))
+    state["numFiles"] = _int(storage.get("num_files"))
+    state["numShares"] = _int(shares.get("num_shares"))
+    state["freeSpaceBytes"] = _int(storage.get("free_space"))
+    state["appUpdates"] = _int(apps.get("num_updates_available")) or 0
+    return state
+
+
+def compute_nc_alerts(nc: dict[str, object]) -> list[dict[str, str]]:
+    """Алерты по состоянию Nextcloud. Место на диске/CPU/RAM сервера уже
+    покрыты обычными алертами машины, поэтому здесь — только NC-специфика."""
+    if not nc.get("configured"):
+        return []
+    alerts: list[dict[str, str]] = []
+
+    def add(id_: str, message: str) -> None:
+        alerts.append({"id": id_, "level": "warning", "message": message})
+
+    if not nc.get("reachable"):
+        add("nc-unreachable", "Nextcloud недоступен")
+        return alerts  # остальное неинформативно, если облако не отвечает
+
+    if nc.get("maintenance"):
+        add("nc-maintenance", "Nextcloud в режиме обслуживания")
+    if nc.get("needsDbUpgrade"):
+        add("nc-db-upgrade", "Nextcloud: требуется апгрейд базы данных")
+    updates = nc.get("appUpdates")
+    if isinstance(updates, int) and updates > 0:
+        word = "обновление" if updates == 1 else "обновлений"
+        add("nc-update", f"Nextcloud: доступно {updates} {word} приложений")
+    return alerts
+
+
+def all_alerts() -> list[dict[str, str]]:
+    """Единый список алертов хоста: метрики машины + Nextcloud. Используется
+    и в GET /alerts, и в watcher'е push — чтобы показ и push совпадали."""
+    return compute_alerts(collect()) + compute_nc_alerts(get_nc_state())
+
+
+def _nc_loop() -> None:
+    """Раз в NC_INTERVAL секунд обновляет кэш состояния Nextcloud. Сам по себе
+    push не шлёт — это делает watcher ntfy, беря NC-алерты из all_alerts()."""
+    if not NC_URL:
+        return
+    while True:
+        state = fetch_nextcloud()
+        with _nc_lock:
+            _nc_state.clear()
+            _nc_state.update(state)
+        time.sleep(NC_INTERVAL)
+
+
+# --------------------------------------------------------------------------
 # ntfy: фоновый watcher, публикует push при появлении нового алерта
 # --------------------------------------------------------------------------
 
@@ -282,7 +420,7 @@ def _watch_loop() -> None:
         if not topic:
             continue
         try:
-            alerts = compute_alerts(collect())
+            alerts = all_alerts()
         except Exception:
             continue
 
@@ -350,9 +488,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/metrics":
             self._json(200, collect())
         elif self.path == "/alerts":
-            self._json(200, {"alerts": compute_alerts(collect())})
+            self._json(200, {"alerts": all_alerts()})
         elif self.path == "/alert-config":
             self._json(200, get_config())
+        elif self.path == "/nextcloud":
+            self._json(200, get_nc_state())
         else:
             self._json(404, {"error": "Не найдено"})
 
@@ -433,9 +573,14 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     server.daemon_threads = True
+    if NC_URL:
+        threading.Thread(target=_nc_loop, daemon=True).start()
     if NTFY_URL:
         threading.Thread(target=_watch_loop, daemon=True).start()
-    print(f"PC Agent слушает {HOST}:{PORT}, пробуждение: {'вкл' if WAKE_ENABLED else 'выкл'}")
+    print(
+        f"PC Agent слушает {HOST}:{PORT}, пробуждение: {'вкл' if WAKE_ENABLED else 'выкл'}, "
+        f"Nextcloud: {'вкл' if NC_URL else 'выкл'}"
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

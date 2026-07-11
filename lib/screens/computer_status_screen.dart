@@ -6,6 +6,7 @@ import '../core/theme.dart';
 import '../models/alert_item.dart';
 import '../models/host_metrics.dart';
 import '../models/monitored_host.dart';
+import '../models/nextcloud_status.dart';
 import '../state/monitor_controller.dart';
 import '../state/settings_controller.dart';
 import '../widgets/computer_form_sheet.dart';
@@ -133,6 +134,7 @@ class ComputerStatusScreen extends StatelessWidget {
                     host: host,
                     metrics: monitor.metricsFor(host.id),
                     alerts: monitor.alertsFor(host.id),
+                    nextcloud: monitor.nextcloudFor(host.id),
                     onWake: host.canWake ? () => _wake(context, host) : null,
                     onEdit: () => _openForm(context, existing: host),
                     onDelete: () {
@@ -158,6 +160,7 @@ class _StatusCard extends StatelessWidget {
     required this.host,
     required this.metrics,
     required this.alerts,
+    required this.nextcloud,
     required this.onWake,
     required this.onEdit,
     required this.onDelete,
@@ -166,6 +169,7 @@ class _StatusCard extends StatelessWidget {
   final MonitoredHost host;
   final HostMetrics metrics;
   final List<AlertItem> alerts;
+  final NextcloudStatus nextcloud;
   final VoidCallback? onWake;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -218,6 +222,10 @@ class _StatusCard extends StatelessWidget {
                 const SizedBox(height: 12),
               ],
               _Metrics(metrics: metrics),
+              if (nextcloud.configured) ...[
+                const Divider(height: 28),
+                _NextcloudCard(nc: nextcloud),
+              ],
             ] else
               _Placeholder(state: metrics.state),
           ],
@@ -307,6 +315,81 @@ class _Metrics extends StatelessWidget {
               ),
             ],
           ),
+        ],
+      ],
+    );
+  }
+}
+
+class _NextcloudCard extends StatelessWidget {
+  const _NextcloudCard({required this.nc});
+  final NextcloudStatus nc;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final status = Theme.of(context).extension<StatusColors>()!;
+
+    final (Color badgeColor, String badgeLabel) = !nc.reachable
+        ? (scheme.error, 'Недоступен')
+        : nc.maintenance
+            ? (status.warning, 'Обслуживание')
+            : (status.success, 'Онлайн');
+
+    Widget stat(IconData icon, String label, String value) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Row(
+            children: [
+              Icon(icon, size: 14, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 8),
+              Text(label, style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
+              const Spacer(),
+              Text(value, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+            ],
+          ),
+        );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.cloud, size: 16, color: scheme.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                nc.version != null ? '${nc.productName ?? 'Nextcloud'} · ${nc.version}' : (nc.productName ?? 'Nextcloud'),
+                style: const TextStyle(fontWeight: FontWeight.w600),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(color: badgeColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20)),
+              child: Text(badgeLabel, style: TextStyle(color: badgeColor, fontSize: 12, fontWeight: FontWeight.w500)),
+            ),
+          ],
+        ),
+        if (nc.reachable && nc.hasServerinfo) ...[
+          const SizedBox(height: 8),
+          if (nc.activeUsers24h != null)
+            stat(Icons.person, 'Активны (5м / 1ч / 24ч)',
+                '${nc.activeUsers5min ?? 0} / ${nc.activeUsers1h ?? 0} / ${nc.activeUsers24h ?? 0}'),
+          if (nc.numUsers != null) stat(Icons.group, 'Пользователи', '${nc.numUsers}'),
+          if (nc.numFiles != null) stat(Icons.description, 'Файлы', '${nc.numFiles}'),
+          if (nc.numShares != null) stat(Icons.share, 'Общие ресурсы', '${nc.numShares}'),
+          if (nc.freeSpaceBytes != null)
+            stat(Icons.sd_storage, 'Свободно', formatBytes(nc.freeSpaceBytes!)),
+          if (nc.updateAvailable)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('Доступно обновлений приложений: ${nc.appUpdates}',
+                  style: TextStyle(fontSize: 13, color: status.warning)),
+            ),
+        ] else if (nc.reachable) ...[
+          const SizedBox(height: 6),
+          Text('Подробная статистика недоступна (не задан токен serverinfo).',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
         ],
       ],
     );

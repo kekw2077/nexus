@@ -8,6 +8,7 @@ import '../models/alert_config.dart';
 import '../models/alert_item.dart';
 import '../models/host_metrics.dart';
 import '../models/monitored_host.dart';
+import '../models/nextcloud_status.dart';
 import '../services/agent_client.dart';
 import '../services/prefs_store.dart';
 import '../services/wol_sender.dart';
@@ -23,6 +24,7 @@ class MonitorController extends ChangeNotifier {
   final List<MonitoredHost> _hosts = [];
   final Map<String, HostMetrics> _metrics = {};
   final Map<String, List<AlertItem>> _alerts = {};
+  final Map<String, NextcloudStatus> _nextcloud = {};
   final Set<String> _booting = {};
   Timer? _poll;
   bool _refreshing = false;
@@ -36,6 +38,8 @@ class MonitorController extends ChangeNotifier {
   }
 
   List<AlertItem> alertsFor(String id) => _alerts[id] ?? const [];
+
+  NextcloudStatus nextcloudFor(String id) => _nextcloud[id] ?? NextcloudStatus.notConfigured();
 
   int get onlineCount => _hosts.where((h) => _metrics[h.id]?.isOnline ?? false).length;
 
@@ -71,9 +75,13 @@ class MonitorController extends ChangeNotifier {
       if (_booting.contains(host.id)) continue; // загрузку отслеживает отдельный watcher
       final result = await _agent.metrics(host.host, host.port, host.token);
       _metrics[host.id] = result;
-      _alerts[host.id] = result.isOnline
-          ? await _agent.alerts(host.host, host.port, host.token)
-          : const [];
+      if (result.isOnline) {
+        _alerts[host.id] = await _agent.alerts(host.host, host.port, host.token);
+        _nextcloud[host.id] = await _agent.nextcloud(host.host, host.port, host.token);
+      } else {
+        _alerts[host.id] = const [];
+        _nextcloud[host.id] = NextcloudStatus.notConfigured();
+      }
     }
     notifyListeners();
   }
@@ -167,6 +175,7 @@ class MonitorController extends ChangeNotifier {
     _hosts.removeWhere((h) => h.id == id);
     _metrics.remove(id);
     _alerts.remove(id);
+    _nextcloud.remove(id);
     _booting.remove(id);
     _persist();
     notifyListeners();

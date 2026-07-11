@@ -5,12 +5,14 @@ import 'package:http/http.dart' as http;
 import '../models/alert_config.dart';
 import '../models/alert_item.dart';
 import '../models/host_metrics.dart';
+import '../models/nextcloud_status.dart';
 
 /// Клиент агента на целевой машине.
 ///   GET  /health         — доступность (без токена)
 ///   GET  /metrics        — метрики (Bearer-токен)
-///   GET  /alerts         — превышенные пороги cpu/ram/disk/temperature (Bearer-токен)
+///   GET  /alerts         — превышенные пороги машины + проблемы Nextcloud (Bearer-токен)
 ///   PUT  /alert-config   — задать пороги/топик ntfy для этого хоста (Bearer-токен)
+///   GET  /nextcloud      — состояние Nextcloud, если настроен на агенте (Bearer-токен)
 ///   POST /wake           — ретрансляция magic-пакета (Bearer-токен)
 class AgentClient {
   AgentClient({http.Client? client}) : _client = client ?? http.Client();
@@ -74,6 +76,27 @@ class AgentClient {
       return list.cast<Map<String, dynamic>>().map(AlertItem.fromJson).toList();
     } catch (_) {
       return const [];
+    }
+  }
+
+  /// Состояние Nextcloud с агента. Если облако у агента не настроено или запрос
+  /// не удался — возвращает NextcloudStatus.notConfigured() (карточка скрыта).
+  Future<NextcloudStatus> nextcloud(
+    String host,
+    int port,
+    String token, {
+    Duration timeout = const Duration(seconds: 4),
+  }) async {
+    try {
+      final res = await _client.get(
+        _uri(host, port, '/nextcloud'),
+        headers: {'Authorization': 'Bearer $token'},
+      ).timeout(timeout);
+
+      if (res.statusCode != 200) return NextcloudStatus.notConfigured();
+      return NextcloudStatus.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+    } catch (_) {
+      return NextcloudStatus.notConfigured();
     }
   }
 

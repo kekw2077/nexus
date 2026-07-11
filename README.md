@@ -115,9 +115,10 @@ flutter build apk --release   # сборка APK
 ```
 GET  /health         -> 200 (без токена)          — доступность, определение загрузки
 GET  /metrics        -> {cpu,ram,disk,...}         — Bearer-токен
-GET  /alerts         -> {alerts:[{id,level,message}]} — превышенные пороги cpu/ram/disk/temperature, Bearer-токен
+GET  /alerts         -> {alerts:[{id,level,message}]} — пороги машины + проблемы Nextcloud, Bearer-токен
 GET  /alert-config   -> {cpu,ram,disk,temperature,ntfyTopic} — текущие пороги/топик этого хоста, Bearer-токен
 PUT  /alert-config    <- {cpu?,ram?,disk?,temperature?,ntfyTopic?} — задать пороги/топик, Bearer-токен
+GET  /nextcloud      -> {configured,reachable,maintenance,version,...} — состояние Nextcloud, Bearer-токен
 POST /wake           -> {mac,broadcast,port}       — ретрансляция magic-пакета
 ```
 
@@ -140,6 +141,27 @@ POST /wake           -> {mac,broadcast,port}       — ретрансляция 
 подпишитесь на `https://<ваш-ntfy-домен>/<topic>`; экран «Состояние» в
 приложении по-прежнему показывает алерты как обычно, пока оно открыто.
 
+### Мониторинг Nextcloud (опционально)
+
+Если Nextcloud крутится на той же машине, что и агент, задайте на сервере
+`PC_AGENT_NC_URL` (адрес облака, например `https://cloud.example.com`) — агент
+раз в `PC_AGENT_NC_INTERVAL` секунд (по умолчанию 60) читает `/status.php`
+(доступность, режим обслуживания, версия) и, если задан `PC_AGENT_NC_TOKEN`
+(токен приложения **serverinfo**), подробную статистику через serverinfo API
+(пользователи, активные за 5м/1ч/24ч, файлы, общие ресурсы, свободное место,
+обновления приложений). Состояние показывается отдельным блоком в карточке
+компьютера, а проблемы (облако недоступно, режим обслуживания, требуется
+апгрейд БД, есть обновления) добавляются в общий поток алертов — то есть тоже
+попадают в push через ntfy. **Учётные данные Nextcloud остаются на сервере**
+(в env-переменных агента), в телефон не передаются.
+
+Токен serverinfo генерируется на сервере Nextcloud:
+```
+occ config:app:set serverinfo token --value "$(openssl rand -hex 32)"
+```
+(в Nextcloud AIO — через `docker exec ... occ ...`). Без токена работает только
+`/status.php` — доступность, режим обслуживания и версия.
+
 ### Два пути Wake-on-LAN
 
 - **Прямой** — телефон сам шлёт magic-пакет по UDP. Работает, когда телефон
@@ -159,7 +181,7 @@ POST /wake           -> {mac,broadcast,port}       — ретрансляция 
 ```
 lib/
   core/        токены темы, форматирование, валидация, генератор id
-  models/      WolTarget, MonitoredHost, HostMetrics, AlertItem, AlertConfig
+  models/      WolTarget, MonitoredHost, HostMetrics, AlertItem, AlertConfig, NextcloudStatus
   services/    prefs_store, agent_client (http), wol_sender (udp), push_service (FCM+local-notifications)
   state/       четыре ChangeNotifier-контроллера (provider)
   screens/     root_shell + четыре вкладки

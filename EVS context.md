@@ -1,7 +1,7 @@
 # EVS (Mirai) — контекст проекта
 
 > Документ для передачи контекста между чатами. Прикладывай его в начало новой сессии, чтобы не объяснять проект заново.
-> Последнее обновление: 2026-07-11 (ночь, 2).
+> Последнее обновление: 2026-07-12.
 
 ---
 
@@ -32,7 +32,9 @@
   - Тесты: `test/alert_config_test.dart` (round-trip), `test/agent_client_test.dart` (схема http/https в `wake()` через фейковый `http.Client`). `flutter analyze`/`flutter test` чистые на каждом шаге, `python -m py_compile "agent slim.py"` — тоже.
 - **Важное ограничение окружения:** на машине, где идёт разработка (Windows), **нет Android SDK и Visual Studio** — здесь нельзя собрать APK, запустить на Windows-десктопе или проверить что-либо из M1/M2/M3 на реальном устройстве/сервере. Всё выше проверено только статически. `agent slim.py` — Linux/Ubuntu-only (`/proc`, `os.statvfs`, `os.getloadavg`), на Windows только `py_compile`.
 - **Не сделано / уточнить на сервере при деплое (не блокирует код):** точные ключи self-hosting ntfy под свой Firebase-проект; не занимает ли Nextcloud AIO порты 80/443 (новым сервисам — свои порты/TLS, не трогать её прокси без проверки); путь для `pc-agent-config.json` под правами systemd-юзера.
-- **Следующий шаг:** развернуть на сервере (Caddy/DNS/порты, ntfy-контейнер, Firebase-проект, `google-services.json` в `android/app/`), собрать APK на машине с Android SDK и проверить вживую на телефоне (WebSocket к десктопному EVS всё ещё некому принимать — там тоже нужна серверная часть); далее — механизм обновления Nexus, переименование в nexus.
+- **Мониторинг Nextcloud (добавлено 2026-07-12):** агент (на том же сервере, что облако) опрашивает `status.php`+serverinfo, отдаёт `GET /nextcloud`, NC-алерты (`nc-unreachable`/`nc-maintenance`/`nc-db-upgrade`/`nc-update`) вливаются в `all_alerts()` → баннер + push. Клиент: `NextcloudStatus`, `AgentClient.nextcloud()`, `MonitorController.nextcloudFor`, `_NextcloudCard` (виден при `configured==true`). Учётные данные NC — только в env агента (`PC_AGENT_NC_URL`/`PC_AGENT_NC_TOKEN`/`PC_AGENT_NC_INTERVAL`). Не проверено на реальном облаке; структура serverinfo зависит от версии NC — сверить при деплое (SERVER_DEPLOY.md §4.5). Тест `test/nextcloud_status_test.dart`.
+- **Runbook для сервера:** `SERVER_DEPLOY.md` в корне — самодостаточная инструкция для отдельного чата с SSH-доступом к серверу (агент systemd, ntfy, Caddy, проверка портов, мониторинг Nextcloud). Ещё не исполнена — сервер не разворачивался.
+- **Следующий шаг:** развернуть на сервере по `SERVER_DEPLOY.md` (агент+ntfy+Caddy+Nextcloud-токен, Firebase-проект, `google-services.json` в `android/app/`), собрать APK на машине с Android SDK и проверить вживую на телефоне (WebSocket к десктопному EVS всё ещё некому принимать — там тоже нужна серверная часть); далее — механизм обновления Nexus, переименование в nexus.
 - **Открытые вопросы:** финализировать переименование `evs_remote` → `nexus`; определить механизм обновления Nexus; протокол сообщений EVS WebSocket — провизорный, зависит от десктопной реализации; ntfy-топик — один на хост (решено), но нет UI для "какие типы алертов включены" отдельно от порогов (порог можно эффективно выключить, оставив его 100/150 — отдельного чекбокса нет, не запрашивалось явно).
 
 ---
@@ -142,18 +144,21 @@ HTTP-агент на каждой отслеживаемой машине (Linux
 - `GET /metrics` → `{cpu,ram,disk,...}`, Bearer-токен
 - `GET /alerts` → `{alerts:[{id,level,message}]}`, Bearer-токен — пороги из мутабельного `_config` (не констант), считаются заново на каждый запрос без сохранения истории
 - `GET/PUT /alert-config` → `{cpu,ram,disk,temperature,ntfyTopic}` — пороги/топик, телефон источник истины, персистентность в `pc-agent-config.json` (`PC_AGENT_STATE_FILE`), `PC_AGENT_ALERT_*` env — только seed-дефолты на первый запуск
+- `GET /nextcloud` → `{configured,reachable,maintenance,needsDbUpgrade,version,hasServerinfo,activeUsers,numUsers,numFiles,numShares,freeSpaceBytes,appUpdates}` — состояние Nextcloud, Bearer-токен; `configured:false` если облако у агента не настроено
 - `POST /wake` → `{mac,broadcast,port}` — ретрансляция magic-пакета, HTTPS-доступен если ретранслятор выставлен через обратный прокси (см. «Два пути Wake-on-LAN»)
 
-Фоновый watcher-поток (`_watch_loop`, `threading.Thread(daemon=True)`, запускается из `main()` только если задан `PC_AGENT_NTFY_URL`): раз в `PC_AGENT_WATCH_INTERVAL` сек (по умолчанию 10) пересчитывает алерты и публикует push в self-hosted ntfy (`ntfyTopic` из конфига) только для **новых** алертов (edge-triggered по `_active_alert_ids`, не спамит, пока условие держится).
+Фоновый watcher-поток (`_watch_loop`, `threading.Thread(daemon=True)`, запускается из `main()` только если задан `PC_AGENT_NTFY_URL`): раз в `PC_AGENT_WATCH_INTERVAL` сек (по умолчанию 10) пересчитывает алерты (`all_alerts()` = метрики машины + Nextcloud) и публикует push в self-hosted ntfy (`ntfyTopic` из конфига) только для **новых** алертов (edge-triggered по `_active_alert_ids`, не спамит, пока условие держится).
 
-Клиент: `AgentClient.alerts()`/`setAlertConfig()` в `lib/services/agent_client.dart`, модели `lib/models/alert_item.dart`/`alert_config.dart`, опрашивается вместе с `/metrics` в `MonitorController._pollOnce` (раз в 4 сек, только для онлайн-хостов), отображается баннером в `computer_status_screen.dart` (`_AlertsBanner`). Push независимо от опроса приходит через `lib/services/push_service.dart` (Firebase+`flutter_local_notifications`, Android-only, тап → вкладка «Состояние» через `RootShell.selectedTab`).
+**Мониторинг Nextcloud** (агент на том же сервере, что облако): отдельный поток `_nc_loop` (запускается только при `PC_AGENT_NC_URL`) раз в `PC_AGENT_NC_INTERVAL` сек (по умолчанию 60) читает `/status.php` (без авторизации) и, при `PC_AGENT_NC_TOKEN` (токен приложения serverinfo), serverinfo API; кэширует в `_nc_state` под `_nc_lock`. `compute_nc_alerts()` даёт NC-алерты (`nc-unreachable`/`nc-maintenance`/`nc-db-upgrade`/`nc-update`), которые вливаются в `all_alerts()` → показ в баннере и push автоматически. Место на диске/CPU/RAM сервера намеренно не дублируются (уже покрыты обычными алертами машины). Учётные данные NC — только в env агента, не в телефоне.
+
+Клиент: `AgentClient.alerts()`/`setAlertConfig()`/`nextcloud()` в `lib/services/agent_client.dart`, модели `lib/models/alert_item.dart`/`alert_config.dart`/`nextcloud_status.dart`, опрашивается вместе с `/metrics` в `MonitorController._pollOnce` (раз в 4 сек, только для онлайн-хостов; `alertsFor`/`nextcloudFor`), отображается баннером + NC-блоком (`_AlertsBanner`/`_NextcloudCard`) в `computer_status_screen.dart` (NC-блок виден только при `configured==true`). Push независимо от опроса приходит через `lib/services/push_service.dart` (Firebase+`flutter_local_notifications`, Android-only, тап → вкладка «Состояние» через `RootShell.selectedTab`).
 
 **Два пути Wake-on-LAN:** прямой (телефон сам шлёт UDP magic-пакет в той же сети) и через ретранслятор (`POST /wake`). Ретранслятор доступен и без Tailscale — переключатель «HTTPS (публичный адрес)» в настройках плюс обратный прокси/проброс порта на сервере (у пользователя статический IP + домен для Nextcloud AIO, порт выберет сам).
 
 ### Структура `lib/`
 
 - `core/` — токены темы, форматирование, валидация (+`validatePercent`/`validateTempThreshold`), генератор id
-- `models/` — WolTarget, MonitoredHost (+пороги/ntfyTopic), HostMetrics, AlertItem, AlertConfig
+- `models/` — WolTarget, MonitoredHost (+пороги/ntfyTopic), HostMetrics, AlertItem, AlertConfig, NextcloudStatus
 - `services/` — prefs_store, agent_client (http/https), wol_sender (udp), push_service (Firebase+local-notifications)
 - `state/` — четыре ChangeNotifier-контроллера (provider)
 - `screens/` — root_shell (+`selectedTab`/`statusTabIndex` для навигации по тапу на push) + четыре вкладки
@@ -171,6 +176,7 @@ HTTP-агент на каждой отслеживаемой машине (Linux
 
 - **EVS** (`evs_controller.dart`) — реальный WebSocket (`web_socket_channel`, `ws://host:port/mobile`, статусы connecting/connected/error/disconnected по факту handshake). Формат сообщений (`{"type": "command"|"recognized", "text": ...}`) — провизорный контракт, финализируется вместе с функцией приёма на десктопе (её пока нет).
 - **Метрики и алерты** — реальный `fetch`, пороги per-host реально пушатся на агент.
+- **Мониторинг Nextcloud** — реальный `fetch` `status.php`+serverinfo на стороне агента, NC-блок в карточке + NC-алерты в общем потоке/push. Не проверено на реальном облаке (нужен сервер с Nextcloud); разбор ответа serverinfo защищённый, но структура зависит от версии NC — сверить при деплое (см. SERVER_DEPLOY.md §4.5).
 - **Push-уведомления** — Android полноценно (Firebase, брендировано под Nexus), iOS сознательно нет (см. README).
 - **Ретранслятор WoL** — доступен по HTTPS без Tailscale (нужна инфра на сервере).
 - **Визуализатор голоса** (`waveform.dart`) — реальный RMS из PCM16-потока микрофона (пакет `record`), не синтетика.
@@ -209,8 +215,9 @@ HTTP-агент на каждой отслеживаемой машине (Linux
 - [x] Nexus: per-host настройка порогов алертов (какие показывать + чувствительность), синхронизация с агентом — сделано 2026-07-11 (M1: `PUT/GET /alert-config`, `AlertConfig`, `ComputerFormSheet`)
 - [x] Nexus: WoL-ретранслятор без Tailscale — сделано 2026-07-11 (M2: `RelayConfig.secure`, HTTPS в `AgentClient`; инфра — Caddy/DNS/порт на сервере, вне кода)
 - [x] Nexus: push-уведомления об алертах (заблокированный экран + обычные) — сделано 2026-07-11 (M3: watcher в `agent slim.py` → self-hosted ntfy → Firebase → `push_service.dart`, Android-only)
-- [ ] Nexus: собрать APK и проверить иконку/WebSocket/RMS/алерты/push/HTTPS-релей на реальном телефоне (эта машина без Android SDK — отложено пользователем)
-- [ ] Деплой на сервере: ntfy-контейнер, Caddy (или альтернатива) на свободном порту, DNS A-записи в существующий домен, Firebase-проект + `google-services.json`, проверить конфликт портов с Nextcloud AIO
+- [x] Nexus: мониторинг состояния Nextcloud (статус + serverinfo + NC-алерты/push) — сделано 2026-07-12 (`GET /nextcloud`, `NextcloudStatus`, `_NextcloudCard`, `PC_AGENT_NC_*`)
+- [ ] Nexus: собрать APK и проверить иконку/WebSocket/RMS/алерты/push/HTTPS-релей/Nextcloud на реальном телефоне (эта машина без Android SDK — отложено пользователем)
+- [ ] Деплой на сервере по `SERVER_DEPLOY.md`: агент systemd, ntfy-контейнер, Caddy на свободном порту, DNS A-записи, Firebase-проект + `google-services.json`, токен serverinfo для Nextcloud, проверить конфликт портов с Nextcloud AIO
 - [ ] Разделить «порог» и «включён ли этот тип алерта» — сейчас выключение алерта эмулируется завышением порога, отдельного чекбокса нет (не запрашивалось явно, но стоит уточнить у пользователя при следующей возможности)
 - [ ] (добавляй сюда по ходу работы)
 
@@ -223,5 +230,6 @@ HTTP-агент на каждой отслеживаемой машине (Linux
 - 2026-07-11 — прочитан репозиторий Nexus, описан в документе; выбрана иконка Hub · Status. Дальше: адаптивная иконка Android + `flutter_launcher_icons`.
 - 2026-07-11 (вечер) — собрана иконка (icon/icon_background/icon_foreground), подключён и прогнан `flutter_launcher_icons` (org `com.kekw2077`, minSdk 24); версия зафиксирована 1.0.0; исправлены баг компиляции в `HostMetrics` (const + `DateTime`) и падающий тест `formatBytes`; `flutter analyze`/`flutter test` чистые. Сборка APK на этой машине невозможна (нет Android SDK) — следующий шаг: собрать и проверить на телефоне.
 - 2026-07-11 (ночь) — реальный WebSocket в `evs_controller.dart`, реальный RMS в `waveform.dart`, `GET /alerts` в `agent slim.py` + клиент/баннер. Проверено только статически.
-- 2026-07-11 (ночь, 2) — по плану `parallel-sprouting-origami.md` реализованы M1 (per-host пороги алертов + топик ntfy, `PUT/GET /alert-config`), M2 (HTTPS для WoL-ретранслятора без Tailscale), M3 (push через self-hosted ntfy + watcher-поток в агенте + Firebase/FCM/`flutter_local_notifications` на Android, iOS сознательно без интеграции). Добавлены тесты `alert_config_test.dart`/`agent_client_test.dart`. `flutter analyze`/`flutter test`/`python -m py_compile` чистые на каждом шаге. Деплой на сервере (ntfy, Caddy, DNS, Firebase-проект) и проверка на реальном телефоне — не сделаны, машина разработки без Android SDK.
+- 2026-07-11 (ночь, 2) — по плану `parallel-sprouting-origami.md` реализованы M1 (per-host пороги алертов + топик ntfy, `PUT/GET /alert-config`), M2 (HTTPS для WoL-ретранслятора без Tailscale), M3 (push через self-hosted ntfy + watcher-поток в агенте + Firebase/FCM/`flutter_local_notifications` на Android, iOS сознательно без интеграции). Добавлены тесты `alert_config_test.dart`/`agent_client_test.dart`. `flutter analyze`/`flutter test`/`python -m py_compile` чистые на каждом шаге. Всё закоммичено (`4594c12`).
+- 2026-07-12 — запушены 3 коммита сессии в origin (репозиторий переехал на `github.com/kekw2077/nexus`). Создан `SERVER_DEPLOY.md` — runbook для чата с SSH к серверу. Добавлен **мониторинг Nextcloud**: агент читает `status.php`+serverinfo (`PC_AGENT_NC_URL`/`PC_AGENT_NC_TOKEN`/`PC_AGENT_NC_INTERVAL`, поток `_nc_loop`, `GET /nextcloud`, NC-алерты в `all_alerts()` → push); клиент `NextcloudStatus`/`AgentClient.nextcloud()`/`nextcloudFor`/`_NextcloudCard`; тест `nextcloud_status_test.dart`. `analyze`/`test` (24 теста)/`py_compile` чистые. Не проверено на реальном облаке/сервере/телефоне.
 - 2026-07-11 (ночь) — реальный WebSocket в `evs_controller.dart` (`web_socket_channel`); реальный RMS из микрофона в `waveform.dart` (пакет `record`); добавлен `GET /alerts` в `agent slim.py` (пользователь принёс файл в корень репо) + клиент (`AlertItem`, `AgentClient.alerts`, `MonitorController.alertsFor`, баннер в `computer_status_screen.dart`). Всё проверено только `flutter analyze`/`flutter test` — реального устройства и Android SDK на этой машине нет, пользователь отложил сборку APK. Следующий шаг: собрать/проверить на телефоне, когда будет машина с SDK.
