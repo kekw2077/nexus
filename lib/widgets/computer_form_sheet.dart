@@ -11,6 +11,11 @@ class ComputerFormResult {
     required this.port,
     this.mac,
     this.token,
+    this.cpuThreshold,
+    this.ramThreshold,
+    this.diskThreshold,
+    this.tempThreshold,
+    this.ntfyTopic,
   });
 
   final String name;
@@ -18,6 +23,11 @@ class ComputerFormResult {
   final int port;
   final String? mac;
   final String? token;
+  final int? cpuThreshold;
+  final int? ramThreshold;
+  final int? diskThreshold;
+  final double? tempThreshold;
+  final String? ntfyTopic;
 }
 
 /// Одна форма на оба списка. Поля включаются флагами:
@@ -91,6 +101,11 @@ class _FormBodyState extends State<_FormBody> {
   late final TextEditingController _host;
   late final TextEditingController _port;
   late final TextEditingController _token;
+  late final TextEditingController _cpuThreshold;
+  late final TextEditingController _ramThreshold;
+  late final TextEditingController _diskThreshold;
+  late final TextEditingController _tempThreshold;
+  late final TextEditingController _ntfyTopic;
 
   @override
   void initState() {
@@ -101,6 +116,11 @@ class _FormBodyState extends State<_FormBody> {
     _host = TextEditingController(text: i?.host ?? '');
     _port = TextEditingController(text: (i?.port ?? widget.defaultPort).toString());
     _token = TextEditingController(text: i?.token ?? '');
+    _cpuThreshold = TextEditingController(text: i?.cpuThreshold?.toString() ?? '');
+    _ramThreshold = TextEditingController(text: i?.ramThreshold?.toString() ?? '');
+    _diskThreshold = TextEditingController(text: i?.diskThreshold?.toString() ?? '');
+    _tempThreshold = TextEditingController(text: i?.tempThreshold?.toString() ?? '');
+    _ntfyTopic = TextEditingController(text: i?.ntfyTopic ?? '');
   }
 
   @override
@@ -110,6 +130,11 @@ class _FormBodyState extends State<_FormBody> {
     _host.dispose();
     _port.dispose();
     _token.dispose();
+    _cpuThreshold.dispose();
+    _ramThreshold.dispose();
+    _diskThreshold.dispose();
+    _tempThreshold.dispose();
+    _ntfyTopic.dispose();
     super.dispose();
   }
 
@@ -121,6 +146,7 @@ class _FormBodyState extends State<_FormBody> {
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
     final macText = _mac.text.trim();
+    final ntfyTopicText = _ntfyTopic.text.trim();
     Navigator.of(context).pop(
       ComputerFormResult(
         name: _name.text.trim(),
@@ -128,6 +154,11 @@ class _FormBodyState extends State<_FormBody> {
         port: int.parse(_port.text.trim()),
         mac: widget.withMac && macText.isNotEmpty ? normalizeMac(macText) : null,
         token: widget.withToken ? _token.text : null,
+        cpuThreshold: widget.withToken ? int.tryParse(_cpuThreshold.text.trim()) : null,
+        ramThreshold: widget.withToken ? int.tryParse(_ramThreshold.text.trim()) : null,
+        diskThreshold: widget.withToken ? int.tryParse(_diskThreshold.text.trim()) : null,
+        tempThreshold: widget.withToken ? double.tryParse(_tempThreshold.text.trim()) : null,
+        ntfyTopic: widget.withToken && ntfyTopicText.isNotEmpty ? ntfyTopicText : null,
       ),
     );
   }
@@ -207,6 +238,68 @@ class _FormBodyState extends State<_FormBody> {
                 style: mono,
                 validator: (v) =>
                     (v == null || v.isEmpty) ? 'Токен нужен для доступа к метрикам' : null,
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Пороги алертов для этой машины. Пусто — не менять текущее значение на агенте.',
+                style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _cpuThreshold,
+                      decoration: const InputDecoration(labelText: 'Порог CPU %', hintText: '90'),
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      validator: validatePercent,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _ramThreshold,
+                      decoration: const InputDecoration(labelText: 'Порог RAM %', hintText: '90'),
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      validator: validatePercent,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _diskThreshold,
+                      decoration: const InputDecoration(labelText: 'Порог диска %', hintText: '90'),
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      validator: validatePercent,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _tempThreshold,
+                      decoration: const InputDecoration(labelText: 'Порог темп. °C', hintText: '85'),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      validator: validateTempThreshold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _ntfyTopic,
+                decoration: const InputDecoration(
+                  labelText: 'Топик ntfy (для push, необязательно)',
+                  hintText: 'nexus-server',
+                ),
+                autocorrect: false,
+                style: mono,
               ),
             ],
             const SizedBox(height: 24),

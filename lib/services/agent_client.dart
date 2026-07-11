@@ -2,20 +2,23 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../models/alert_config.dart';
 import '../models/alert_item.dart';
 import '../models/host_metrics.dart';
 
 /// Клиент агента на целевой машине.
-///   GET  /health   — доступность (без токена)
-///   GET  /metrics  — метрики (Bearer-токен)
-///   GET  /alerts   — превышенные пороги cpu/ram/disk/temperature (Bearer-токен)
-///   POST /wake     — ретрансляция magic-пакета (Bearer-токен)
+///   GET  /health         — доступность (без токена)
+///   GET  /metrics        — метрики (Bearer-токен)
+///   GET  /alerts         — превышенные пороги cpu/ram/disk/temperature (Bearer-токен)
+///   PUT  /alert-config   — задать пороги/топик ntfy для этого хоста (Bearer-токен)
+///   POST /wake           — ретрансляция magic-пакета (Bearer-токен)
 class AgentClient {
   AgentClient({http.Client? client}) : _client = client ?? http.Client();
 
   final http.Client _client;
 
-  Uri _uri(String host, int port, String path) => Uri.parse('http://$host:$port$path');
+  Uri _uri(String host, int port, String path, {String scheme = 'http'}) =>
+      Uri.parse('$scheme://$host:$port$path');
 
   Future<bool> health(
     String host,
@@ -74,6 +77,39 @@ class AgentClient {
     }
   }
 
+  /// Сохраняет пороги/топик ntfy на агенте — телефон источник истины,
+  /// агент просто исполняет присланное.
+  Future<String?> setAlertConfig(
+    String host,
+    int port,
+    String token,
+    AlertConfig config, {
+    Duration timeout = const Duration(seconds: 4),
+  }) async {
+    try {
+      final res = await _client
+          .put(
+            _uri(host, port, '/alert-config'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(config.toJson()),
+          )
+          .timeout(timeout);
+
+      if (res.statusCode == 200) return null;
+      try {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        return body['error'] as String? ?? 'Ошибка ${res.statusCode}';
+      } catch (_) {
+        return 'Ошибка ${res.statusCode}';
+      }
+    } catch (_) {
+      return 'Агент недоступен';
+    }
+  }
+
   /// Просит агент отправить magic-пакет в свою локальную сеть.
   /// Возвращает текст ошибки или null при успехе.
   Future<String?> wake(
@@ -83,12 +119,13 @@ class AgentClient {
     required String mac,
     required String broadcast,
     int wolPort = 9,
+    bool secure = false,
     Duration timeout = const Duration(seconds: 5),
   }) async {
     try {
       final res = await _client
           .post(
-            _uri(host, port, '/wake'),
+            _uri(host, port, '/wake', scheme: secure ? 'https' : 'http'),
             headers: {
               'Authorization': 'Bearer $token',
               'Content-Type': 'application/json',

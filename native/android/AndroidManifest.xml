@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <!-- Для будущего голосового ввода (микрофон EVS) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Push-уведомления об алертах (Android 13+ требует явный runtime-запрос) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
         android:label="Управление ПК"

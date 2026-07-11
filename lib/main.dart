@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'app.dart';
 import 'services/prefs_store.dart';
+import 'services/push_service.dart';
 import 'state/evs_controller.dart';
 import 'state/monitor_controller.dart';
 import 'state/settings_controller.dart';
@@ -11,6 +12,7 @@ import 'state/wol_controller.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final store = await PrefsStore.create();
+  await PushService.init();
 
   runApp(
     MultiProvider(

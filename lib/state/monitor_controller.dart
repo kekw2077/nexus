@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../core/id.dart';
+import '../models/alert_config.dart';
 import '../models/alert_item.dart';
 import '../models/host_metrics.dart';
 import '../models/monitored_host.dart';
@@ -132,6 +133,36 @@ class MonitorController extends ChangeNotifier {
     _pollOnce();
   }
 
+  /// Пушит пороги/топик ntfy на агент этого хоста; телефон источник истины,
+  /// поэтому кэшируем на MonitoredHost сразу, не дожидаясь ответа агента.
+  Future<String?> setAlertConfig(
+    String id, {
+    int? cpu,
+    int? ram,
+    int? disk,
+    double? temperature,
+    String? ntfyTopic,
+  }) async {
+    final i = _hosts.indexWhere((h) => h.id == id);
+    if (i == -1) return null;
+    final host = _hosts[i].copyWith(
+      alertCpu: cpu,
+      alertRam: ram,
+      alertDisk: disk,
+      alertTemp: temperature,
+      ntfyTopic: ntfyTopic,
+    );
+    _hosts[i] = host;
+    _persist();
+    notifyListeners();
+    return _agent.setAlertConfig(
+      host.host,
+      host.port,
+      host.token,
+      AlertConfig(cpu: cpu, ram: ram, disk: disk, temperature: temperature, ntfyTopic: ntfyTopic),
+    );
+  }
+
   void remove(String id) {
     _hosts.removeWhere((h) => h.id == id);
     _metrics.remove(id);
@@ -150,7 +181,14 @@ class MonitorController extends ChangeNotifier {
 
     String? error;
     if (relay != null && relay.usable) {
-      error = await _agent.wake(relay.host, relay.port, relay.token, mac: host.mac!, broadcast: broadcast);
+      error = await _agent.wake(
+        relay.host,
+        relay.port,
+        relay.token,
+        mac: host.mac!,
+        broadcast: broadcast,
+        secure: relay.secure,
+      );
     } else {
       try {
         await WolSender.send(host.mac!, broadcast: broadcast);

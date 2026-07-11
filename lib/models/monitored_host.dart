@@ -12,6 +12,11 @@ class MonitoredHost {
     this.port = 8765,
     this.mac,
     this.broadcast,
+    this.alertCpu,
+    this.alertRam,
+    this.alertDisk,
+    this.alertTemp,
+    this.ntfyTopic,
   });
 
   final String id;
@@ -21,6 +26,11 @@ class MonitoredHost {
   final String token;
   final String? mac;
   final String? broadcast;
+  final int? alertCpu;
+  final int? alertRam;
+  final int? alertDisk;
+  final double? alertTemp;
+  final String? ntfyTopic;
 
   bool get canWake => mac != null && mac!.isNotEmpty;
 
@@ -31,6 +41,11 @@ class MonitoredHost {
     String? token,
     String? mac,
     String? broadcast,
+    int? alertCpu,
+    int? alertRam,
+    int? alertDisk,
+    double? alertTemp,
+    String? ntfyTopic,
   }) {
     return MonitoredHost(
       id: id,
@@ -40,6 +55,11 @@ class MonitoredHost {
       token: token ?? this.token,
       mac: mac ?? this.mac,
       broadcast: broadcast ?? this.broadcast,
+      alertCpu: alertCpu ?? this.alertCpu,
+      alertRam: alertRam ?? this.alertRam,
+      alertDisk: alertDisk ?? this.alertDisk,
+      alertTemp: alertTemp ?? this.alertTemp,
+      ntfyTopic: ntfyTopic ?? this.ntfyTopic,
     );
   }
 
@@ -51,6 +71,11 @@ class MonitoredHost {
         'token': token,
         'mac': mac,
         'broadcast': broadcast,
+        'alertCpu': alertCpu,
+        'alertRam': alertRam,
+        'alertDisk': alertDisk,
+        'alertTemp': alertTemp,
+        'ntfyTopic': ntfyTopic,
       };
 
   factory MonitoredHost.fromJson(Map<String, dynamic> json) {
@@ -62,6 +87,11 @@ class MonitoredHost {
       token: json['token'] as String? ?? '',
       mac: json['mac'] as String?,
       broadcast: json['broadcast'] as String?,
+      alertCpu: (json['alertCpu'] as num?)?.toInt(),
+      alertRam: (json['alertRam'] as num?)?.toInt(),
+      alertDisk: (json['alertDisk'] as num?)?.toInt(),
+      alertTemp: (json['alertTemp'] as num?)?.toDouble(),
+      ntfyTopic: json['ntfyTopic'] as String?,
     );
   }
 }

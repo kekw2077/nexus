@@ -190,6 +190,12 @@ class _RelaySection extends StatelessWidget {
           onChanged: (v) => settings.setRelay(enabled: v),
         ),
         if (settings.relayEnabled) ...[
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('HTTPS (публичный адрес)'),
+            value: settings.relaySecure,
+            onChanged: (v) => settings.setRelay(secure: v),
+          ),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

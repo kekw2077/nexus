@@ -11,12 +11,14 @@ class RelayConfig {
     required this.host,
     required this.port,
     required this.token,
+    required this.secure,
   });
 
   final bool enabled;
   final String host;
   final int port;
   final String token;
+  final bool secure;
 
   bool get usable => enabled && host.trim().isNotEmpty && token.isNotEmpty;
 }
@@ -33,6 +35,7 @@ class SettingsController extends ChangeNotifier {
   String _relayHost = '';
   int _relayPort = 8765;
   String _relayToken = '';
+  bool _relaySecure = false;
 
   AppBrand get brand => _brand;
   ThemeMode get themeMode => _themeMode;
@@ -41,12 +44,14 @@ class SettingsController extends ChangeNotifier {
   String get relayHost => _relayHost;
   int get relayPort => _relayPort;
   String get relayToken => _relayToken;
+  bool get relaySecure => _relaySecure;
 
   RelayConfig get relay => RelayConfig(
         enabled: _relayEnabled,
         host: _relayHost,
         port: _relayPort,
         token: _relayToken,
+        secure: _relaySecure,
       );
 
   void load() {
@@ -66,6 +71,7 @@ class SettingsController extends ChangeNotifier {
     _relayHost = _store.getString('settings.relayHost') ?? '';
     _relayPort = int.tryParse(_store.getString('settings.relayPort') ?? '') ?? 8765;
     _relayToken = _store.getString('settings.relayToken') ?? '';
+    _relaySecure = _store.getBool('settings.relaySecure') ?? false;
 
     notifyListeners();
   }
@@ -82,7 +88,7 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setRelay({bool? enabled, String? host, int? port, String? token}) {
+  void setRelay({bool? enabled, String? host, int? port, String? token, bool? secure}) {
     if (enabled != null) {
       _relayEnabled = enabled;
       _store.setBool('settings.relayEnabled', enabled);
@@ -98,6 +104,10 @@ class SettingsController extends ChangeNotifier {
     if (token != null) {
       _relayToken = token;
       _store.setString('settings.relayToken', token);
+    }
+    if (secure != null) {
+      _relaySecure = secure;
+      _store.setBool('settings.relaySecure', secure);
     }
     notifyListeners();
   }

@@ -42,3 +42,20 @@ String? validateHost(String? value) =>
 
 String? validatePort(String? value) =>
     isValidPort(value ?? '') ? null : 'Порт 1–65535';
+
+/// Порог в процентах (cpu/ram/disk). Пустое значение допустимо — значит
+/// «не менять», проверка не срабатывает.
+String? validatePercent(String? value) {
+  final v = value?.trim() ?? '';
+  if (v.isEmpty) return null;
+  final n = int.tryParse(v);
+  return (n != null && n >= 1 && n <= 100) ? null : 'Диапазон 1–100';
+}
+
+/// Порог температуры в градусах. Пустое значение допустимо — «не менять».
+String? validateTempThreshold(String? value) {
+  final v = value?.trim() ?? '';
+  if (v.isEmpty) return null;
+  final n = double.tryParse(v);
+  return (n != null && n >= 1 && n <= 150) ? null : 'Диапазон 1–150';
+}

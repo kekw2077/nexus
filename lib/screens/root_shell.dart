@@ -11,6 +11,12 @@ import 'wake_on_lan_screen.dart';
 class RootShell extends StatefulWidget {
   const RootShell({super.key});
 
+  /// Индекс выбранной вкладки. PushService меняет это извне (тап по
+  /// push-уведомлению), не имея BuildContext — отдельного экрана на хост
+  /// в приложении нет, поэтому тап просто открывает вкладку «Состояние».
+  static final ValueNotifier<int> selectedTab = ValueNotifier(0);
+  static const statusTabIndex = 2;
+
   @override
   State<RootShell> createState() => _RootShellState();
 }
@@ -28,6 +34,27 @@ class _RootShellState extends State<RootShell> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    RootShell.selectedTab.addListener(_onExternalTabChange);
+  }
+
+  @override
+  void dispose() {
+    RootShell.selectedTab.removeListener(_onExternalTabChange);
+    super.dispose();
+  }
+
+  void _onExternalTabChange() {
+    if (mounted) setState(() => _index = RootShell.selectedTab.value);
+  }
+
+  void _select(int i) {
+    RootShell.selectedTab.value = i;
+    setState(() => _index = i);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -37,7 +64,7 @@ class _RootShellState extends State<RootShell> {
       body: SafeArea(child: IndexedStack(index: _index, children: _screens)),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        onDestinationSelected: _select,
         destinations: const [
           NavigationDestination(icon: Icon(Icons.mic_none), selectedIcon: Icon(Icons.mic), label: 'Голос'),
           NavigationDestination(icon: Icon(Icons.power_settings_new), label: 'WoL'),

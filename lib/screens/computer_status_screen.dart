@@ -33,11 +33,17 @@ class ComputerStatusScreen extends StatelessWidget {
               port: existing.port,
               token: existing.token,
               mac: existing.mac,
+              cpuThreshold: existing.alertCpu,
+              ramThreshold: existing.alertRam,
+              diskThreshold: existing.alertDisk,
+              tempThreshold: existing.alertTemp,
+              ntfyTopic: existing.ntfyTopic,
             ),
     );
     if (result == null) return;
 
     final broadcast = result.mac != null ? '255.255.255.255' : null;
+    String hostId;
     if (existing == null) {
       monitor.add(
         name: result.name,
@@ -47,6 +53,7 @@ class ComputerStatusScreen extends StatelessWidget {
         mac: result.mac,
         broadcast: broadcast,
       );
+      hostId = monitor.hosts.last.id;
       _toast(context, '${result.name} добавлен в мониторинг');
     } else {
       monitor.update(
@@ -58,7 +65,26 @@ class ComputerStatusScreen extends StatelessWidget {
         mac: result.mac,
         broadcast: result.mac != null ? (existing.broadcast ?? '255.255.255.255') : null,
       );
+      hostId = existing.id;
       _toast(context, '${result.name} сохранён');
+    }
+
+    if (result.cpuThreshold != null ||
+        result.ramThreshold != null ||
+        result.diskThreshold != null ||
+        result.tempThreshold != null ||
+        result.ntfyTopic != null) {
+      final error = await monitor.setAlertConfig(
+        hostId,
+        cpu: result.cpuThreshold,
+        ram: result.ramThreshold,
+        disk: result.diskThreshold,
+        temperature: result.tempThreshold,
+        ntfyTopic: result.ntfyTopic,
+      );
+      if (error != null && context.mounted) {
+        _toast(context, 'Пороги не синхронизированы: $error');
+      }
     }
   }
 
