@@ -18,6 +18,14 @@ class NextcloudStatus {
     this.numShares,
     this.freeSpaceBytes,
     this.appUpdates,
+    this.coreUpdateAvailable = false,
+    this.coreUpdateVersion,
+    this.warningsCount,
+    this.warnings = const [],
+    this.phpVersion,
+    this.webserver,
+    this.database,
+    this.dbSizeBytes,
   });
 
   final bool configured;
@@ -35,6 +43,18 @@ class NextcloudStatus {
   final int? numShares;
   final int? freeSpaceBytes;
   final int? appUpdates;
+
+  /// occ-проверки (доступны только если на агенте задан PC_AGENT_NC_OCC).
+  final bool coreUpdateAvailable;
+  final String? coreUpdateVersion;
+  final int? warningsCount;
+  final List<String> warnings;
+
+  /// Серверная техинфа из serverinfo.
+  final String? phpVersion;
+  final String? webserver;
+  final String? database;
+  final int? dbSizeBytes;
 
   bool get updateAvailable => (appUpdates ?? 0) > 0;
 
@@ -58,6 +78,14 @@ class NextcloudStatus {
       numShares: (json['numShares'] as num?)?.toInt(),
       freeSpaceBytes: (json['freeSpaceBytes'] as num?)?.toInt(),
       appUpdates: (json['appUpdates'] as num?)?.toInt(),
+      coreUpdateAvailable: json['coreUpdateAvailable'] as bool? ?? false,
+      coreUpdateVersion: json['coreUpdateVersion'] as String?,
+      warningsCount: (json['warningsCount'] as num?)?.toInt(),
+      warnings: (json['warnings'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+      phpVersion: json['phpVersion'] as String?,
+      webserver: json['webserver'] as String?,
+      database: json['database'] as String?,
+      dbSizeBytes: (json['dbSizeBytes'] as num?)?.toInt(),
     );
   }
 }

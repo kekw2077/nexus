@@ -55,5 +55,36 @@ void main() {
       expect(nc.configured, isTrue);
       expect(nc.reachable, isFalse);
     });
+
+    test('fromJson — occ-проверки и серверная техинфа', () {
+      final nc = NextcloudStatus.fromJson({
+        'configured': true,
+        'reachable': true,
+        'hasServerinfo': true,
+        'coreUpdateAvailable': true,
+        'coreUpdateVersion': '30.0.1',
+        'warningsCount': 2,
+        'warnings': ['Нет индекса БД', 'memcache не настроен'],
+        'phpVersion': '8.3.2',
+        'webserver': 'Apache',
+        'database': 'mysql 10.11',
+        'dbSizeBytes': 1048576,
+      });
+      expect(nc.coreUpdateAvailable, isTrue);
+      expect(nc.coreUpdateVersion, '30.0.1');
+      expect(nc.warningsCount, 2);
+      expect(nc.warnings, hasLength(2));
+      expect(nc.phpVersion, '8.3.2');
+      expect(nc.database, 'mysql 10.11');
+      expect(nc.dbSizeBytes, 1048576);
+    });
+
+    test('fromJson — occ/serverinfo поля отсутствуют → безопасные дефолты', () {
+      final nc = NextcloudStatus.fromJson({'configured': true, 'reachable': true});
+      expect(nc.coreUpdateAvailable, isFalse);
+      expect(nc.warnings, isEmpty);
+      expect(nc.warningsCount, isNull);
+      expect(nc.phpVersion, isNull);
+    });
   });
 }

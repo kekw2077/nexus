@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../core/theme.dart';
 import '../state/evs_controller.dart';
+import 'cloud_status_screen.dart';
 import 'computer_status_screen.dart';
 import 'settings_screen.dart';
 import 'voice_control_screen.dart';
@@ -24,12 +25,13 @@ class RootShell extends StatefulWidget {
 class _RootShellState extends State<RootShell> {
   int _index = 0;
 
-  static const _titles = ['Голос', 'Wake on LAN', 'Состояние', 'Настройки'];
+  static const _titles = ['Голос', 'Wake on LAN', 'Состояние', 'Облако', 'Настройки'];
 
   final _screens = const [
     VoiceControlScreen(),
     WakeOnLanScreen(),
     ComputerStatusScreen(),
+    CloudStatusScreen(),
     SettingsScreen(),
   ];
 
@@ -69,6 +71,7 @@ class _RootShellState extends State<RootShell> {
           NavigationDestination(icon: Icon(Icons.mic_none), selectedIcon: Icon(Icons.mic), label: 'Голос'),
           NavigationDestination(icon: Icon(Icons.power_settings_new), label: 'WoL'),
           NavigationDestination(icon: Icon(Icons.monitor_heart_outlined), selectedIcon: Icon(Icons.monitor_heart), label: 'Статус'),
+          NavigationDestination(icon: Icon(Icons.cloud_outlined), selectedIcon: Icon(Icons.cloud), label: 'Облако'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Настройки'),
         ],
       ),

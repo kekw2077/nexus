@@ -24,10 +24,13 @@ Push-уведомления об алертах (опционально): зад
 например https://cloud.example.com) — фоновый поток раз в PC_AGENT_NC_INTERVAL
 секунд (по умолчанию 60) читает /status.php (без авторизации) и, если задан
 PC_AGENT_NC_TOKEN (токен приложения serverinfo), подробную статистику через
-serverinfo API. Состояние отдаётся в /nextcloud, а проблемы (недоступно,
-режим обслуживания, нужен апгрейд БД, есть обновления) добавляются в /alerts
-и пушатся тем же watcher'ом. Учётные данные Nextcloud остаются на сервере,
-в телефон не передаются.
+serverinfo API. Если задан PC_AGENT_NC_OCC (префикс вызова occ, например
+"docker exec --user www-data nextcloud-aio-nextcloud php occ"), дополнительно
+проверяются обновление ядра (occ update:check) и предупреждения настройки/
+безопасности (occ setupchecks). Состояние отдаётся в /nextcloud, а проблемы
+(недоступно, режим обслуживания, нужен апгрейд БД, обновления приложений/ядра,
+предупреждения) добавляются в /alerts и пушатся тем же watcher'ом. Учётные
+данные Nextcloud остаются на сервере, в телефон не передаются.
 """
 
 from __future__ import annotations
@@ -36,8 +39,10 @@ import json
 import os
 import re
 import secrets
+import shlex
 import socket
 import struct
+import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -59,6 +64,11 @@ STATE_PATH = Path(os.environ.get("PC_AGENT_STATE_FILE", "pc-agent-config.json"))
 NC_URL = os.environ.get("PC_AGENT_NC_URL", "").rstrip("/")
 NC_TOKEN = os.environ.get("PC_AGENT_NC_TOKEN", "")
 NC_INTERVAL = int(os.environ.get("PC_AGENT_NC_INTERVAL", "60"))
+# Префикс вызова occ, если агент может достучаться до Nextcloud CLI. Например:
+#   Nextcloud AIO: "docker exec --user www-data nextcloud-aio-nextcloud php occ"
+#   обычный NC:    "sudo -u www-data php /var/www/nextcloud/occ"
+# Пусто — occ-проверки (обновление ядра, предупреждения настройки) не запускаются.
+NC_OCC = os.environ.get("PC_AGENT_NC_OCC", "")
 
 if not TOKEN:
     raise SystemExit(
@@ -283,6 +293,60 @@ def _http_get_json(url: str, headers: dict[str, str] | None = None, timeout: int
         return json.loads(resp.read().decode())
 
 
+def _run_occ(subcmd: list[str], timeout: int = 25) -> tuple[int, str]:
+    """Запускает occ через NC_OCC-префикс (обычно `docker exec ... php occ`).
+    Возвращает (код возврата, stdout). Команда — из доверенной env, не из сети."""
+    proc = subprocess.run(
+        shlex.split(NC_OCC) + subcmd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    return proc.returncode, proc.stdout or ""
+
+
+def _occ_checks(state: dict[str, object]) -> None:
+    """Дописывает в state результаты occ-проверок: обновление ядра и
+    предупреждения настройки/безопасности. Требует доступ агента к occ
+    (NC_OCC). Каждая проверка изолирована — сбой одной не рушит остальные."""
+    if not NC_OCC:
+        return
+
+    # Обновление ядра Nextcloud (не приложений). Текст occ update:check меняется
+    # между версиями — ориентируемся на «is available»; при отсутствии — ядро в норме.
+    try:
+        _, out = _run_occ(["update:check"])
+        low = out.lower()
+        available = "is available" in low or "are available" in low
+        state["coreUpdateAvailable"] = bool(available)
+        if available:
+            m = re.search(r"Nextcloud\s+([0-9][0-9.]*)\s+is available", out)
+            state["coreUpdateVersion"] = m.group(1) if m else None
+    except (OSError, subprocess.SubprocessError):
+        pass  # occ недоступен/таймаут — поле просто не выставляем
+
+    # Предупреждения настройки/безопасности (occ setupchecks, NC 28+).
+    # ВНИМАНИЕ: JSON-структура setupchecks зависит от версии — читаем защищённо.
+    try:
+        _, out = _run_occ(["setupchecks", "--output=json"])
+        checks = json.loads(out)
+        messages: list[str] = []
+        items = checks.values() if isinstance(checks, dict) else (checks if isinstance(checks, list) else [])
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            severity = str(item.get("severity", "")).lower()
+            passed = item.get("pass")
+            is_problem = severity in ("warning", "error") or passed is False
+            if is_problem:
+                text = item.get("description") or item.get("name") or item.get("check") or "предупреждение"
+                messages.append(str(text))
+        state["warnings"] = messages
+        state["warningsCount"] = len(messages)
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        pass  # occ setupchecks нет (старая версия)/не JSON — поле не выставляем
+
+
 def fetch_nextcloud() -> dict[str, object]:
     """Собирает состояние Nextcloud. status.php — без авторизации (доступность,
     режим обслуживания, версия). serverinfo — по токену приложения serverinfo
@@ -300,8 +364,10 @@ def fetch_nextcloud() -> dict[str, object]:
     state["version"] = status.get("versionstring") or status.get("version")
     state["productName"] = status.get("productname") or "Nextcloud"
 
+    _occ_checks(state)  # обновление ядра + предупреждения (если задан NC_OCC)
+
     if not NC_TOKEN:
-        return state  # только status.php, без подробной статистики
+        return state  # только status.php + occ, без подробной статистики serverinfo
 
     try:
         info = _http_get_json(
@@ -319,6 +385,9 @@ def fetch_nextcloud() -> dict[str, object]:
     shares = nc.get("shares", {}) if isinstance(nc, dict) else {}
     active = data.get("activeUsers", {}) if isinstance(data, dict) else {}
     apps = system.get("apps", {}) if isinstance(system, dict) else {}
+    server = data.get("server", {}) if isinstance(data, dict) else {}
+    php = server.get("php", {}) if isinstance(server, dict) else {}
+    database = server.get("database", {}) if isinstance(server, dict) else {}
 
     def _int(v):
         try:
@@ -337,6 +406,15 @@ def fetch_nextcloud() -> dict[str, object]:
     state["numShares"] = _int(shares.get("num_shares"))
     state["freeSpaceBytes"] = _int(storage.get("free_space"))
     state["appUpdates"] = _int(apps.get("num_updates_available")) or 0
+
+    # Серверная техинфа (статичная, но полезно видеть версии и рост БД).
+    state["phpVersion"] = php.get("version")
+    state["webserver"] = server.get("webserver")
+    db_type = database.get("type")
+    db_version = database.get("version")
+    if db_type:
+        state["database"] = f"{db_type} {db_version}".strip() if db_version else str(db_type)
+    state["dbSizeBytes"] = _int(database.get("size"))
     return state
 
 
@@ -362,6 +440,13 @@ def compute_nc_alerts(nc: dict[str, object]) -> list[dict[str, str]]:
     if isinstance(updates, int) and updates > 0:
         word = "обновление" if updates == 1 else "обновлений"
         add("nc-update", f"Nextcloud: доступно {updates} {word} приложений")
+    if nc.get("coreUpdateAvailable"):
+        version = nc.get("coreUpdateVersion")
+        add("nc-core-update", f"Доступно обновление Nextcloud{f' {version}' if version else ''}")
+    warnings = nc.get("warningsCount")
+    if isinstance(warnings, int) and warnings > 0:
+        word = "предупреждение" if warnings == 1 else "предупреждений"
+        add("nc-warnings", f"Nextcloud: {warnings} {word} настройки/безопасности")
     return alerts
 
 
