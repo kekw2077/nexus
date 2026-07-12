@@ -14,7 +14,7 @@ class EvsRemoteApp extends StatelessWidget {
     final settings = context.watch<SettingsController>();
 
     return MaterialApp(
-      title: 'Управление ПК',
+      title: 'Nexus',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(settings.brand, Brightness.light),
       darkTheme: buildTheme(settings.brand, Brightness.dark),

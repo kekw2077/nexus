@@ -172,7 +172,8 @@ class _FormBodyState extends State<_FormBody> {
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
       child: Form(
         key: _formKey,
-        child: Column(
+        child: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -318,6 +319,7 @@ class _FormBodyState extends State<_FormBody> {
               ],
             ),
           ],
+        ),
         ),
       ),
     );
