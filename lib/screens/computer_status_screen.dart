@@ -38,7 +38,6 @@ class ComputerStatusScreen extends StatelessWidget {
               ramThreshold: existing.alertRam,
               diskThreshold: existing.alertDisk,
               tempThreshold: existing.alertTemp,
-              ntfyTopic: existing.ntfyTopic,
             ),
     );
     if (result == null) return;
@@ -70,23 +69,70 @@ class ComputerStatusScreen extends StatelessWidget {
       _toast(context, '${result.name} сохранён');
     }
 
-    if (result.cpuThreshold != null ||
-        result.ramThreshold != null ||
-        result.diskThreshold != null ||
-        result.tempThreshold != null ||
-        result.ntfyTopic != null) {
-      final error = await monitor.setAlertConfig(
-        hostId,
-        cpu: result.cpuThreshold,
-        ram: result.ramThreshold,
-        disk: result.diskThreshold,
-        temperature: result.tempThreshold,
-        ntfyTopic: result.ntfyTopic,
-      );
-      if (error != null && context.mounted) {
-        _toast(context, 'Пороги не синхронизированы: $error');
-      }
+    final thresholdsChanged = existing == null
+        ? result.hasThresholds
+        : result.cpuThreshold != existing.alertCpu ||
+            result.ramThreshold != existing.alertRam ||
+            result.diskThreshold != existing.alertDisk ||
+            result.tempThreshold != existing.alertTemp;
+    if (!thresholdsChanged || !context.mounted) return;
+
+    // Пороги изменены — спросить, применить их для всех устройств или только тут.
+    final scope = await _askAlertScope(context);
+    if (scope == null || !context.mounted) return;
+
+    final error = await monitor.setAlertConfig(
+      hostId,
+      scope: scope,
+      cpu: result.cpuThreshold,
+      ram: result.ramThreshold,
+      disk: result.diskThreshold,
+      temperature: result.tempThreshold,
+    );
+    if (!context.mounted) return;
+    if (error != null) {
+      _toast(context, 'Пороги не синхронизированы: $error');
+    } else if (scope == 'device') {
+      await _showLocalOnlyWarning(context);
     }
+  }
+
+  /// Диалог выбора области применения порогов. Возвращает 'all' / 'device' / null.
+  Future<String?> _askAlertScope(BuildContext context) {
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Пороги алертов изменены'),
+        content: const Text(
+          'Применить для всех устройств (общие настройки на сервере) или только '
+          'для этого телефона?\n\n'
+          'Push делает сервер, поэтому «только этот телефон» тоже сохраняется на '
+          'сервере — но как отдельный оверрайд именно для этого устройства.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'device'), child: const Text('Только это устройство')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, 'all'), child: const Text('Для всех')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showLocalOnlyWarning(BuildContext context) {
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Только на этом устройстве'),
+        content: const Text(
+          'Пороги применены как оверрайд для этого телефона. Баннеры и push здесь '
+          'используют ваши значения; на других устройствах алерты и push — по общим '
+          'серверным порогам.',
+        ),
+        actions: [
+          FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Понятно')),
+        ],
+      ),
+    );
   }
 
   Future<void> _wake(BuildContext context, MonitoredHost host) async {
@@ -216,6 +262,10 @@ class _StatusCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
+            if (host.alertsLocalOnly) ...[
+              _LocalThresholdsChip(),
+              const SizedBox(height: 10),
+            ],
             if (online) ...[
               if (alerts.isNotEmpty) ...[
                 _AlertsBanner(alerts: alerts),
@@ -228,6 +278,32 @@ class _StatusCard extends StatelessWidget {
               ],
             ] else
               _Placeholder(state: metrics.state),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LocalThresholdsChip extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: scheme.secondaryContainer.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.smartphone, size: 13, color: scheme.onSecondaryContainer),
+            const SizedBox(width: 5),
+            Text('Локальные пороги',
+                style: TextStyle(fontSize: 12, color: scheme.onSecondaryContainer, fontWeight: FontWeight.w500)),
           ],
         ),
       ),

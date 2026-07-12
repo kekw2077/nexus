@@ -46,7 +46,9 @@ void _openStatusTab() {
 /// Firebase-проект. Только Android — на iOS нет Apple Developer Program,
 /// там пользователь ставит официальное приложение ntfy (см. README).
 abstract final class PushService {
-  static Future<void> init() async {
+  /// [topic] — топик ntfy/FCM этого устройства (DeviceIdentity.topic). Телефон
+  /// подписывается на него, чтобы получать только свои per-device уведомления.
+  static Future<void> init({String? topic}) async {
     if (Platform.isIOS) return;
 
     await Firebase.initializeApp();
@@ -75,5 +77,16 @@ abstract final class PushService {
     // плане — показываем его вручную тем же путём, что и фоновый обработчик.
     FirebaseMessaging.onMessage.listen(_showNotification);
     FirebaseMessaging.onMessageOpenedApp.listen((_) => _openStatusTab());
+
+    // Подписка на топик этого устройства. Точное соответствие топика ntfy →
+    // FCM-топика зависит от настройки ntfy-Firebase-релея — свериться с
+    // актуальной документацией ntfy при развёртывании (см. SERVER_DEPLOY.md).
+    if (topic != null && topic.isNotEmpty) {
+      try {
+        await FirebaseMessaging.instance.subscribeToTopic(topic);
+      } catch (_) {
+        // подписка не критична для остального — не роняем init
+      }
+    }
   }
 }

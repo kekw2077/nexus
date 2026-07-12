@@ -62,11 +62,13 @@ class AgentClient {
     String host,
     int port,
     String token, {
+    String? deviceId,
     Duration timeout = const Duration(seconds: 4),
   }) async {
     try {
+      final path = deviceId != null ? '/alerts?device=$deviceId' : '/alerts';
       final res = await _client.get(
-        _uri(host, port, '/alerts'),
+        _uri(host, port, path),
         headers: {'Authorization': 'Bearer $token'},
       ).timeout(timeout);
 
@@ -100,16 +102,29 @@ class AgentClient {
     }
   }
 
-  /// Сохраняет пороги/топик ntfy на агенте — телефон источник истины,
-  /// агент просто исполняет присланное.
+  /// Отправляет на агент пороги/регистрацию устройства (multi-tenant).
+  ///   scope 'all'      — общие пороги (для всех устройств);
+  ///   scope 'device'   — оверрайд только для этого deviceId;
+  ///   scope 'clear'    — снять оверрайд устройства (вернуть на общие);
+  ///   scope 'register' — только зарегистрировать топик (чтобы получать push).
+  /// deviceId/topic — идентичность устройства; телефон источник истины.
   Future<String?> setAlertConfig(
     String host,
     int port,
-    String token,
-    AlertConfig config, {
+    String token, {
+    required String deviceId,
+    required String topic,
+    required String scope,
+    AlertConfig thresholds = const AlertConfig(),
     Duration timeout = const Duration(seconds: 4),
   }) async {
     try {
+      final body = <String, dynamic>{
+        'deviceId': deviceId,
+        'topic': topic,
+        'scope': scope,
+        ...thresholds.toJson(),
+      };
       final res = await _client
           .put(
             _uri(host, port, '/alert-config'),
@@ -117,14 +132,14 @@ class AgentClient {
               'Authorization': 'Bearer $token',
               'Content-Type': 'application/json',
             },
-            body: jsonEncode(config.toJson()),
+            body: jsonEncode(body),
           )
           .timeout(timeout);
 
       if (res.statusCode == 200) return null;
       try {
-        final body = jsonDecode(res.body) as Map<String, dynamic>;
-        return body['error'] as String? ?? 'Ошибка ${res.statusCode}';
+        final err = jsonDecode(res.body) as Map<String, dynamic>;
+        return err['error'] as String? ?? 'Ошибка ${res.statusCode}';
       } catch (_) {
         return 'Ошибка ${res.statusCode}';
       }

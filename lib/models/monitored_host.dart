@@ -3,6 +3,10 @@ import '../core/id.dart';
 /// Машина под наблюдением. Требует токен для доступа к агенту.
 /// MAC и broadcast опциональны: если заданы, карточка получает кнопку включения
 /// (сервер и будят, и мониторят; прочие ПК могут жить только в списке WoL).
+///
+/// alertCpu/… — последние введённые на этом устройстве пороги (для префилла формы).
+/// alertsLocalOnly — пороги применены оверрайдом только для этого устройства
+/// (агент шлёт push этому телефону по ним; другим — по общим серверным).
 class MonitoredHost {
   MonitoredHost({
     required this.id,
@@ -16,7 +20,7 @@ class MonitoredHost {
     this.alertRam,
     this.alertDisk,
     this.alertTemp,
-    this.ntfyTopic,
+    this.alertsLocalOnly = false,
   });
 
   final String id;
@@ -30,7 +34,7 @@ class MonitoredHost {
   final int? alertRam;
   final int? alertDisk;
   final double? alertTemp;
-  final String? ntfyTopic;
+  final bool alertsLocalOnly;
 
   bool get canWake => mac != null && mac!.isNotEmpty;
 
@@ -45,7 +49,7 @@ class MonitoredHost {
     int? alertRam,
     int? alertDisk,
     double? alertTemp,
-    String? ntfyTopic,
+    bool? alertsLocalOnly,
   }) {
     return MonitoredHost(
       id: id,
@@ -59,7 +63,7 @@ class MonitoredHost {
       alertRam: alertRam ?? this.alertRam,
       alertDisk: alertDisk ?? this.alertDisk,
       alertTemp: alertTemp ?? this.alertTemp,
-      ntfyTopic: ntfyTopic ?? this.ntfyTopic,
+      alertsLocalOnly: alertsLocalOnly ?? this.alertsLocalOnly,
     );
   }
 
@@ -75,7 +79,7 @@ class MonitoredHost {
         'alertRam': alertRam,
         'alertDisk': alertDisk,
         'alertTemp': alertTemp,
-        'ntfyTopic': ntfyTopic,
+        'alertsLocalOnly': alertsLocalOnly,
       };
 
   factory MonitoredHost.fromJson(Map<String, dynamic> json) {
@@ -91,7 +95,7 @@ class MonitoredHost {
       alertRam: (json['alertRam'] as num?)?.toInt(),
       alertDisk: (json['alertDisk'] as num?)?.toInt(),
       alertTemp: (json['alertTemp'] as num?)?.toDouble(),
-      ntfyTopic: json['ntfyTopic'] as String?,
+      alertsLocalOnly: json['alertsLocalOnly'] as bool? ?? false,
     );
   }
 }

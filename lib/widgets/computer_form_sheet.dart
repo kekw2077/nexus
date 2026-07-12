@@ -15,7 +15,6 @@ class ComputerFormResult {
     this.ramThreshold,
     this.diskThreshold,
     this.tempThreshold,
-    this.ntfyTopic,
   });
 
   final String name;
@@ -27,7 +26,9 @@ class ComputerFormResult {
   final int? ramThreshold;
   final int? diskThreshold;
   final double? tempThreshold;
-  final String? ntfyTopic;
+
+  bool get hasThresholds =>
+      cpuThreshold != null || ramThreshold != null || diskThreshold != null || tempThreshold != null;
 }
 
 /// Одна форма на оба списка. Поля включаются флагами:
@@ -105,7 +106,6 @@ class _FormBodyState extends State<_FormBody> {
   late final TextEditingController _ramThreshold;
   late final TextEditingController _diskThreshold;
   late final TextEditingController _tempThreshold;
-  late final TextEditingController _ntfyTopic;
 
   @override
   void initState() {
@@ -120,7 +120,6 @@ class _FormBodyState extends State<_FormBody> {
     _ramThreshold = TextEditingController(text: i?.ramThreshold?.toString() ?? '');
     _diskThreshold = TextEditingController(text: i?.diskThreshold?.toString() ?? '');
     _tempThreshold = TextEditingController(text: i?.tempThreshold?.toString() ?? '');
-    _ntfyTopic = TextEditingController(text: i?.ntfyTopic ?? '');
   }
 
   @override
@@ -134,7 +133,6 @@ class _FormBodyState extends State<_FormBody> {
     _ramThreshold.dispose();
     _diskThreshold.dispose();
     _tempThreshold.dispose();
-    _ntfyTopic.dispose();
     super.dispose();
   }
 
@@ -146,7 +144,6 @@ class _FormBodyState extends State<_FormBody> {
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
     final macText = _mac.text.trim();
-    final ntfyTopicText = _ntfyTopic.text.trim();
     Navigator.of(context).pop(
       ComputerFormResult(
         name: _name.text.trim(),
@@ -158,7 +155,6 @@ class _FormBodyState extends State<_FormBody> {
         ramThreshold: widget.withToken ? int.tryParse(_ramThreshold.text.trim()) : null,
         diskThreshold: widget.withToken ? int.tryParse(_diskThreshold.text.trim()) : null,
         tempThreshold: widget.withToken ? double.tryParse(_tempThreshold.text.trim()) : null,
-        ntfyTopic: widget.withToken && ntfyTopicText.isNotEmpty ? ntfyTopicText : null,
       ),
     );
   }
@@ -291,16 +287,6 @@ class _FormBodyState extends State<_FormBody> {
                     ),
                   ),
                 ],
-              ),
-              const SizedBox(height: 14),
-              TextFormField(
-                controller: _ntfyTopic,
-                decoration: const InputDecoration(
-                  labelText: 'Топик ntfy (для push, необязательно)',
-                  hintText: 'nexus-server',
-                ),
-                autocorrect: false,
-                style: mono,
               ),
             ],
             const SizedBox(height: 24),

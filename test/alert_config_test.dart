@@ -14,14 +14,12 @@ void main() {
         'ram': 90,
         'disk': 85,
         'temperature': 82.5,
-        'ntfyTopic': 'nexus-server',
       };
       final config = AlertConfig.fromJson(json);
       expect(config.cpu, 95);
       expect(config.ram, 90);
       expect(config.disk, 85);
       expect(config.temperature, 82.5);
-      expect(config.ntfyTopic, 'nexus-server');
       expect(config.toJson(), json);
     });
 
@@ -31,7 +29,6 @@ void main() {
       expect(config.ram, isNull);
       expect(config.disk, isNull);
       expect(config.temperature, isNull);
-      expect(config.ntfyTopic, isNull);
       expect(config.toJson(), <String, dynamic>{});
     });
   });

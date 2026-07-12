@@ -10,6 +10,7 @@ import '../models/host_metrics.dart';
 import '../models/monitored_host.dart';
 import '../models/nextcloud_status.dart';
 import '../services/agent_client.dart';
+import '../services/device_identity.dart';
 import '../services/prefs_store.dart';
 import '../services/wol_sender.dart';
 import 'settings_controller.dart';
@@ -21,11 +22,13 @@ class MonitorController extends ChangeNotifier {
   final AgentClient _agent;
   static const _key = 'monitor.hosts';
 
+  late final DeviceIdentity _device;
   final List<MonitoredHost> _hosts = [];
   final Map<String, HostMetrics> _metrics = {};
   final Map<String, List<AlertItem>> _alerts = {};
   final Map<String, NextcloudStatus> _nextcloud = {};
   final Set<String> _booting = {};
+  final Set<String> _registered = {}; // хосты, которым уже отправили регистрацию устройства
   Timer? _poll;
   bool _refreshing = false;
 
@@ -44,6 +47,7 @@ class MonitorController extends ChangeNotifier {
   int get onlineCount => _hosts.where((h) => _metrics[h.id]?.isOnline ?? false).length;
 
   void load() {
+    _device = DeviceIdentity.ensure(_store);
     final raw = _store.getString(_key);
     _hosts.clear();
     if (raw != null) {
@@ -76,7 +80,16 @@ class MonitorController extends ChangeNotifier {
       final result = await _agent.metrics(host.host, host.port, host.token);
       _metrics[host.id] = result;
       if (result.isOnline) {
-        _alerts[host.id] = await _agent.alerts(host.host, host.port, host.token);
+        // Регистрируем это устройство у агента (один раз на хост), чтобы оно
+        // попало в per-device push и получало уведомления по своим порогам.
+        if (!_registered.contains(host.id) && host.token.isNotEmpty) {
+          _registered.add(host.id);
+          unawaited(_agent.setAlertConfig(
+            host.host, host.port, host.token,
+            deviceId: _device.id, topic: _device.topic, scope: 'register',
+          ));
+        }
+        _alerts[host.id] = await _agent.alerts(host.host, host.port, host.token, deviceId: _device.id);
         _nextcloud[host.id] = await _agent.nextcloud(host.host, host.port, host.token);
       } else {
         _alerts[host.id] = const [];
@@ -141,15 +154,18 @@ class MonitorController extends ChangeNotifier {
     _pollOnce();
   }
 
-  /// Пушит пороги/топик ntfy на агент этого хоста; телефон источник истины,
-  /// поэтому кэшируем на MonitoredHost сразу, не дожидаясь ответа агента.
+  /// Отправляет пороги на агент этого хоста от имени этого устройства.
+  ///   scope 'all'    — общие пороги (применятся ко всем устройствам);
+  ///   scope 'device' — оверрайд только для этого телефона.
+  /// Кэшируем на MonitoredHost сразу (для префилла формы и индикатора), не
+  /// дожидаясь ответа агента.
   Future<String?> setAlertConfig(
     String id, {
+    required String scope,
     int? cpu,
     int? ram,
     int? disk,
     double? temperature,
-    String? ntfyTopic,
   }) async {
     final i = _hosts.indexWhere((h) => h.id == id);
     if (i == -1) return null;
@@ -158,16 +174,20 @@ class MonitorController extends ChangeNotifier {
       alertRam: ram,
       alertDisk: disk,
       alertTemp: temperature,
-      ntfyTopic: ntfyTopic,
+      alertsLocalOnly: scope == 'device',
     );
     _hosts[i] = host;
+    _registered.add(host.id);
     _persist();
     notifyListeners();
     return _agent.setAlertConfig(
       host.host,
       host.port,
       host.token,
-      AlertConfig(cpu: cpu, ram: ram, disk: disk, temperature: temperature, ntfyTopic: ntfyTopic),
+      deviceId: _device.id,
+      topic: _device.topic,
+      scope: scope,
+      thresholds: AlertConfig(cpu: cpu, ram: ram, disk: disk, temperature: temperature),
     );
   }
 

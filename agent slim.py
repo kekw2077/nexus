@@ -3,22 +3,28 @@
 PC Agent — метрики Ubuntu + ретранслятор Wake-on-LAN.
 Только стандартная библиотека. Ни pip, ни venv не нужны.
 
-    GET  /health          без токена, "жив ли хост"
-    GET  /metrics         cpu / ram / disk / temperature / uptimeSec
-    GET  /alerts          проблемы хоста (машина + Nextcloud) — пороги превышены
-    GET  /alert-config    текущие пороги + топик ntfy для этого хоста
-    PUT  /alert-config    задать пороги/топик с телефона — источник истины телефон
-    GET  /nextcloud       состояние Nextcloud (status.php + serverinfo), если настроен
-    POST /wake            {"mac": "00:1A:2B:3C:4D:5E", "broadcast": "192.168.1.255"}
+    GET  /health              без токена, "жив ли хост"
+    GET  /metrics             cpu / ram / disk / temperature / uptimeSec
+    GET  /alerts?device=ID    проблемы хоста (машина + Nextcloud) по порогам устройства
+    GET  /alert-config?device=ID  эффективные пороги устройства + топик + localOverride
+    PUT  /alert-config        {deviceId, topic?, scope, cpu?,ram?,disk?,temperature?}
+    GET  /nextcloud           состояние Nextcloud (status.php + serverinfo), если настроен
+    POST /wake                {"mac": "00:1A:2B:3C:4D:5E", "broadcast": "192.168.1.255"}
 
 Запуск:
     PC_AGENT_TOKEN=... python3 agent.py
 
+Пороги алертов — multi-tenant (см. блок ниже): общий default + оверрайды по
+устройствам. PUT /alert-config со scope="all" меняет общие пороги (для всех),
+scope="device" — оверрайд конкретного deviceId (его баннеры и push), "clear" —
+снять оверрайд, "register" — только зарегистрировать топик устройства.
+
 Push-уведомления об алертах (опционально): задайте PC_AGENT_NTFY_URL
 (адрес self-hosted ntfy, например https://ntfy.example.com) — тогда фоновый
-поток раз в PC_AGENT_WATCH_INTERVAL секунд (по умолчанию 10) проверяет
-алерты и публикует push в топик, заданный через PUT /alert-config
-(поле ntfyTopic). Без PC_AGENT_NTFY_URL или ntfyTopic поток не запускается.
+поток раз в PC_AGENT_WATCH_INTERVAL секунд (по умолчанию 10) идёт по всем
+зарегистрированным устройствам и шлёт каждому в его топик его алерты (по его
+эффективным порогам). Без PC_AGENT_NTFY_URL или без зарегистрированных
+устройств с топиком поток ничего не публикует.
 
 Мониторинг Nextcloud (опционально): задайте PC_AGENT_NC_URL (адрес облака,
 например https://cloud.example.com) — фоновый поток раз в PC_AGENT_NC_INTERVAL
@@ -47,6 +53,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 TOKEN = os.environ.get("PC_AGENT_TOKEN", "")
 HOST = os.environ.get("PC_AGENT_HOST", "0.0.0.0")
@@ -80,42 +87,131 @@ MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$")
 
 
 # --------------------------------------------------------------------------
-# Настраиваемые с телефона пороги + топик ntfy. Телефон — источник истины:
-# /alert-config только принимает и сохраняет то, что ему прислали; env-переменные
-# ALERT_* — лишь seed-значения на первый запуск, если сохранённого файла ещё нет.
+# Пороги алертов, multi-tenant. Телефон — источник истины.
+#   _default  — общие пороги: применяются ко всем устройствам без оверрайда.
+#   _devices  — карта deviceId -> {topic, cpu?, ram?, disk?, temperature?}.
+#     topic  — куда слать push этому устройству;
+#     пороги-оверрайды (если заданы) заменяют дефолтные для баннеров и push
+#     именно этого устройства, не затрагивая другие.
+# env ALERT_* — seed-дефолты на первый запуск, если сохранённого файла ещё нет.
+# Состояние в STATE_PATH: {"default": {...}, "devices": {...}} (старый плоский
+# формат {cpu,ram,...} читается как default — обратная совместимость).
 # --------------------------------------------------------------------------
 
+_THRESHOLD_KEYS = ("cpu", "ram", "disk", "temperature")
+
 _cfg_lock = threading.Lock()
-_config: dict[str, float | str | None] = {
+_default: dict[str, float] = {
     "cpu": ALERT_CPU,
     "ram": ALERT_RAM,
     "disk": ALERT_DISK,
     "temperature": ALERT_TEMP,
-    "ntfyTopic": None,
 }
-
-try:
-    _loaded = json.loads(STATE_PATH.read_text())
-    if isinstance(_loaded, dict):
-        _config.update({k: v for k, v in _loaded.items() if k in _config})
-except (FileNotFoundError, json.JSONDecodeError, OSError):
-    pass
+_devices: dict[str, dict] = {}
 
 
-def get_config() -> dict[str, float | str | None]:
+def _load_state() -> None:
+    try:
+        loaded = json.loads(STATE_PATH.read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return
+    if not isinstance(loaded, dict):
+        return
+    if "default" in loaded or "devices" in loaded:  # новый формат
+        d = loaded.get("default")
+        if isinstance(d, dict):
+            _default.update({k: v for k, v in d.items() if k in _THRESHOLD_KEYS})
+        dev = loaded.get("devices")
+        if isinstance(dev, dict):
+            _devices.update({k: v for k, v in dev.items() if isinstance(v, dict)})
+    else:  # старый плоский формат → в default
+        _default.update({k: v for k, v in loaded.items() if k in _THRESHOLD_KEYS})
+
+
+_load_state()
+
+
+def _persist_locked() -> None:
+    try:
+        STATE_PATH.write_text(json.dumps({"default": _default, "devices": _devices}))
+    except OSError:
+        pass  # диск только для чтения — состояние остаётся в памяти
+
+
+def _apply_thresholds(dst: dict, patch: dict) -> None:
+    for k in _THRESHOLD_KEYS:
+        if k in patch and patch[k] is not None:
+            dst[k] = float(patch[k])
+
+
+def set_default(patch: dict) -> None:
+    """«Применить для всех»: меняет общие пороги."""
     with _cfg_lock:
-        return dict(_config)
+        _apply_thresholds(_default, patch)
+        _persist_locked()
 
 
-def set_config(patch: dict[str, float | str | None]) -> dict[str, float | str | None]:
+def register_device(device_id: str, topic: str | None) -> None:
+    """Гарантирует, что устройство известно агенту (чтобы получать push).
+    Обновляет топик, не трогая пороги-оверрайды."""
     with _cfg_lock:
-        _config.update({k: v for k, v in patch.items() if k in _config})
-        snapshot = dict(_config)
-        try:
-            STATE_PATH.write_text(json.dumps(snapshot))
-        except OSError:
-            pass  # диск недоступен на запись — конфиг остаётся хотя бы в памяти
-    return snapshot
+        dev = _devices.setdefault(device_id, {})
+        if topic:
+            dev["topic"] = topic
+        _persist_locked()
+
+
+def set_device_override(device_id: str, topic: str | None, patch: dict) -> None:
+    """«Только для этого устройства»: оверрайд порогов для одного deviceId."""
+    with _cfg_lock:
+        dev = _devices.setdefault(device_id, {})
+        if topic:
+            dev["topic"] = topic
+        _apply_thresholds(dev, patch)
+        _persist_locked()
+
+
+def clear_device_override(device_id: str, topic: str | None) -> None:
+    """Убирает оверрайд, оставляя устройство (и топик) на дефолтных порогах."""
+    with _cfg_lock:
+        dev = _devices.setdefault(device_id, {})
+        if topic:
+            dev["topic"] = topic
+        for k in _THRESHOLD_KEYS:
+            dev.pop(k, None)
+        _persist_locked()
+
+
+def effective_thresholds(device_id: str | None) -> dict[str, float]:
+    with _cfg_lock:
+        result = dict(_default)
+        dev = _devices.get(device_id) if device_id else None
+        if dev:
+            for k in _THRESHOLD_KEYS:
+                if dev.get(k) is not None:
+                    result[k] = dev[k]
+        return result
+
+
+def device_config(device_id: str | None) -> dict:
+    """Что показать телефону: эффективные пороги + признак локального оверрайда + топик."""
+    with _cfg_lock:
+        result: dict = dict(_default)
+        dev = _devices.get(device_id) if device_id else None
+        has_override = False
+        if dev:
+            for k in _THRESHOLD_KEYS:
+                if dev.get(k) is not None:
+                    result[k] = dev[k]
+                    has_override = True
+            result["ntfyTopic"] = dev.get("topic")
+        result["localOverride"] = has_override
+        return result
+
+
+def list_devices() -> dict[str, dict]:
+    with _cfg_lock:
+        return {k: dict(v) for k, v in _devices.items()}
 
 
 # --------------------------------------------------------------------------
@@ -242,29 +338,28 @@ def collect() -> dict[str, object]:
     }
 
 
-def compute_alerts(m: dict[str, object]) -> list[dict[str, str]]:
-    """Пороговые алерты по свежесобранным метрикам. Без состояния и истории —
-    хост либо превышает порог прямо сейчас, либо нет. Пороги настраиваются
-    с телефона через /alert-config (см. get_config/set_config выше)."""
-    cfg = get_config()
+def compute_alerts(m: dict[str, object], thresholds: dict[str, float]) -> list[dict[str, str]]:
+    """Пороговые алерты по свежесобранным метрикам и заданным порогам. Без
+    состояния и истории — хост либо превышает порог прямо сейчас, либо нет.
+    Пороги — эффективные для устройства (default + оверрайд), см. multi-tenant выше."""
     alerts: list[dict[str, str]] = []
 
     def add(id_: str, level: str, message: str) -> None:
         alerts.append({"id": id_, "level": level, "message": message})
 
     cpu = m["cpu"]
-    if cpu >= cfg["cpu"]:
+    if cpu >= thresholds["cpu"]:
         add("cpu", "warning", f"Процессор загружен на {cpu}%")
 
     ram = m["ram"]
-    if ram >= cfg["ram"]:
+    if ram >= thresholds["ram"]:
         add("ram", "warning", f"Память заполнена на {ram}%")
 
     disk = m["disk"]
-    if disk >= cfg["disk"]:
+    if disk >= thresholds["disk"]:
         add("disk", "warning", f"Диск заполнен на {disk}%")
 
-    if m["hasTemperature"] and m["temperature"] >= cfg["temperature"]:
+    if m["hasTemperature"] and m["temperature"] >= thresholds["temperature"]:
         add("temperature", "warning", f"Температура процессора {m['temperature']}°C")
 
     return alerts
@@ -450,10 +545,11 @@ def compute_nc_alerts(nc: dict[str, object]) -> list[dict[str, str]]:
     return alerts
 
 
-def all_alerts() -> list[dict[str, str]]:
-    """Единый список алертов хоста: метрики машины + Nextcloud. Используется
-    и в GET /alerts, и в watcher'е push — чтобы показ и push совпадали."""
-    return compute_alerts(collect()) + compute_nc_alerts(get_nc_state())
+def all_alerts(device_id: str | None = None) -> list[dict[str, str]]:
+    """Единый список алертов хоста для устройства: метрики машины (по его
+    эффективным порогам) + Nextcloud (одинаково для всех). Используется в
+    GET /alerts?device= и в watcher'е push — чтобы показ и push совпадали."""
+    return compute_alerts(collect(), effective_thresholds(device_id)) + compute_nc_alerts(get_nc_state())
 
 
 def _nc_loop() -> None:
@@ -477,7 +573,9 @@ NTFY_URL = os.environ.get("PC_AGENT_NTFY_URL", "").rstrip("/")
 WATCH_INTERVAL = int(os.environ.get("PC_AGENT_WATCH_INTERVAL", "10"))
 
 _watch_lock = threading.Lock()
-_active_alert_ids: set[str] = set()
+# Набор активных id алертов на каждое устройство — для edge-triggered push
+# (шлём только новые, не спамим, пока условие держится).
+_active_by_device: dict[str, set[str]] = {}
 
 
 def _publish_ntfy(topic: str, title: str, message: str) -> None:
@@ -493,35 +591,36 @@ def _publish_ntfy(topic: str, title: str, message: str) -> None:
 
 
 def _watch_loop() -> None:
-    """Раз в WATCH_INTERVAL секунд пересчитывает алерты и шлёт push в ntfy
-    только для тех, что появились впервые с прошлого цикла (edge-triggered) —
-    не спамит, пока условие остаётся в силе."""
+    """Раз в WATCH_INTERVAL секунд идёт по всем зарегистрированным устройствам
+    и шлёт каждому в его топик его алерты (по его эффективным порогам), только
+    те, что появились впервые с прошлого цикла (edge-triggered per-device)."""
     if not NTFY_URL:
         return
     while True:
         time.sleep(WATCH_INTERVAL)
-        cfg = get_config()
-        topic = cfg.get("ntfyTopic")
-        if not topic:
-            continue
         try:
-            alerts = all_alerts()
+            metrics = collect()
         except Exception:
             continue
+        nc_alerts = compute_nc_alerts(get_nc_state())  # одинаковы для всех устройств
 
-        ids = {a["id"] for a in alerts}
-        with _watch_lock:
-            newly = ids - _active_alert_ids
-            _active_alert_ids.clear()
-            _active_alert_ids.update(ids)
-
-        for alert in alerts:
-            if alert["id"] not in newly:
+        for device_id, dev in list_devices().items():
+            topic = dev.get("topic")
+            if not topic:
                 continue
-            try:
-                _publish_ntfy(str(topic), os.uname().nodename, alert["message"])
-            except OSError:
-                pass  # доставка лучше-чем-ничего, не роняем поток
+            alerts = compute_alerts(metrics, effective_thresholds(device_id)) + nc_alerts
+            ids = {a["id"] for a in alerts}
+            with _watch_lock:
+                prev = _active_by_device.get(device_id, set())
+                newly = ids - prev
+                _active_by_device[device_id] = ids
+            for alert in alerts:
+                if alert["id"] not in newly:
+                    continue
+                try:
+                    _publish_ntfy(str(topic), os.uname().nodename, alert["message"])
+                except OSError:
+                    pass  # доставка лучше-чем-ничего, не роняем поток
 
 
 # --------------------------------------------------------------------------
@@ -562,7 +661,11 @@ class Handler(BaseHTTPRequestHandler):
         return secrets.compare_digest(supplied, TOKEN)
 
     def do_GET(self) -> None:
-        if self.path == "/health":
+        parsed = urlparse(self.path)
+        path = parsed.path
+        device = parse_qs(parsed.query).get("device", [None])[0]
+
+        if path == "/health":
             self._json(200, {"status": "ok"})
             return
 
@@ -570,13 +673,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json(401, {"error": "Неверный токен"})
             return
 
-        if self.path == "/metrics":
+        if path == "/metrics":
             self._json(200, collect())
-        elif self.path == "/alerts":
-            self._json(200, {"alerts": all_alerts()})
-        elif self.path == "/alert-config":
-            self._json(200, get_config())
-        elif self.path == "/nextcloud":
+        elif path == "/alerts":
+            self._json(200, {"alerts": all_alerts(device)})
+        elif path == "/alert-config":
+            self._json(200, device_config(device))
+        elif path == "/nextcloud":
             self._json(200, get_nc_state())
         else:
             self._json(404, {"error": "Не найдено"})
@@ -586,7 +689,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(401, {"error": "Неверный токен"})
             return
 
-        if self.path != "/alert-config":
+        if urlparse(self.path).path != "/alert-config":
             self._json(404, {"error": "Не найдено"})
             return
 
@@ -597,7 +700,16 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "Тело запроса не является JSON"})
             return
 
-        patch: dict[str, float | str | None] = {}
+        device_id = str(body.get("deviceId") or "").strip()
+        if not device_id:
+            self._json(400, {"error": "deviceId обязателен"})
+            return
+        topic = str(body["topic"]) if body.get("topic") else None
+        # scope: "all" — общие пороги; "device" — оверрайд этого устройства;
+        # "clear" — снять оверрайд (вернуть на общие); "register" — только топик.
+        scope = str(body.get("scope") or "register")
+
+        patch: dict[str, float] = {}
         bounds = {"cpu": (1, 100), "ram": (1, 100), "disk": (1, 100), "temperature": (1, 150)}
         for key, (lo, hi) in bounds.items():
             if key not in body:
@@ -612,11 +724,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             patch[key] = value
 
-        if "ntfyTopic" in body:
-            topic = body["ntfyTopic"]
-            patch["ntfyTopic"] = str(topic) if topic else None
+        if scope == "all":
+            set_default(patch)
+            register_device(device_id, topic)  # чтобы устройство получало push
+        elif scope == "device":
+            set_device_override(device_id, topic, patch)
+        elif scope == "clear":
+            clear_device_override(device_id, topic)
+        else:  # register
+            register_device(device_id, topic)
 
-        self._json(200, set_config(patch))
+        self._json(200, device_config(device_id))
 
     def do_POST(self) -> None:
         if not self._authorized():
