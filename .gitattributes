@@ -1,0 +1,2 @@
+# gradlew — shell-скрипт, на Linux-раннере CI должен иметь LF, иначе не запустится
+android/gradlew text eol=lf

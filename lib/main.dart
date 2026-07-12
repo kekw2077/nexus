@@ -12,7 +12,12 @@ import 'state/wol_controller.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final store = await PrefsStore.create();
-  await PushService.init();
+  // Push — не критичен для запуска: если Firebase не сконфигурирован или
+  // недоступен, приложение всё равно должно стартовать (метрики/WoL/облако
+  // работают без него).
+  try {
+    await PushService.init();
+  } catch (_) {}
 
   runApp(
     MultiProvider(

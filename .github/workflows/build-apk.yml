@@ -1,0 +1,61 @@
+name: Build APK
+
+# Собирает установочный APK (Android). Firebase-конфиг подставляется из секрета
+# GOOGLE_SERVICES_JSON (base64 от google-services.json твоего Firebase-проекта).
+# Запуск: вручную (workflow_dispatch) или при пуше кода в main (кроме доков).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/**'
+      - 'android/**'
+      - 'assets/**'
+      - 'pubspec.yaml'
+      - '.github/workflows/build-apk.yml'
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.6
+          cache: true
+
+      - run: flutter --version
+
+      - name: Восстановить google-services.json из секрета
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "::error::Секрет GOOGLE_SERVICES_JSON не задан. Добавьте его в Settings → Secrets and variables → Actions (base64 от google-services.json)."
+            exit 1
+          fi
+          echo "$GOOGLE_SERVICES_JSON" | base64 -d > android/app/google-services.json
+          echo "google-services.json записан ($(wc -c < android/app/google-services.json) байт)"
+
+      - run: flutter pub get
+
+      - name: Тесты
+        run: flutter test
+
+      - name: Сборка release APK
+        run: flutter build apk --release
+
+      - name: Загрузить APK как артефакт
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error

@@ -108,6 +108,37 @@ flutter build apk --release   # сборка APK
 
 В VS Code: F5 или «Run and Debug». Выбор устройства — в правом нижнем углу.
 
+## Сборка APK в облаке (GitHub Actions)
+
+Если под рукой нет Android SDK, APK собирается в CI — workflow
+`.github/workflows/build-apk.yml` (запуск вручную через вкладку **Actions →
+Build APK → Run workflow**, либо автоматически при пуше кода в `main`). Готовый
+`app-release.apk` кладётся в артефакты запуска (подписан debug-ключом —
+устанавливается сайдлоадом).
+
+Для Android папка `android/` **закоммичена и настроена** (в отличие от `ios/`,
+которая по-прежнему генерируется `flutter create`): applicationId
+`com.kekw2077.evs_remote`, `minSdk 24`, core library desugaring для
+`flutter_local_notifications`, Gradle-плагин Google services для FCM.
+
+Push (Firebase) требует `google-services.json` — он **не хранится в репозитории**
+(в `.gitignore`), а подставляется в CI из секрета репозитория
+`GOOGLE_SERVICES_JSON`. Подготовка:
+
+1. Создайте бесплатный проект в [Firebase Console](https://console.firebase.google.com),
+   добавьте Android-приложение с package name **`com.kekw2077.evs_remote`**,
+   скачайте `google-services.json`.
+2. Закодируйте в base64 и положите в секрет репозитория
+   (**Settings → Secrets and variables → Actions → New repository secret**,
+   имя `GOOGLE_SERVICES_JSON`):
+   ```bash
+   base64 -w0 google-services.json   # Linux; на macOS: base64 google-services.json
+   ```
+3. Запустите workflow. Без секрета сборка остановится с понятной ошибкой.
+
+Локальная сборка APK на машине с Android SDK работает так же, но требует
+положить `google-services.json` в `android/app/` вручную.
+
 ## Как это связано с агентом
 
 Приложение ждёт на каждой отслеживаемой машине HTTP-агент:

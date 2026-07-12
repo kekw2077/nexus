@@ -23,6 +23,8 @@ android/local.properties
 android/key.properties
 **/*.keystore
 **/*.jks
+# Секрет Firebase — подставляется в CI из секрета GOOGLE_SERVICES_JSON, в репо не хранится
+android/app/google-services.json
 
 # iOS / macOS
 ios/Pods/
