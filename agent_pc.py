@@ -175,8 +175,8 @@ def read_memory() -> tuple[int, int]:
     return int(stat.dwMemoryLoad), int(stat.ullTotalPhys)
 
 
-def read_disk(path: str) -> tuple[int, int]:
-    """(процент занятого, всего байт) для тома, которому принадлежит path."""
+def _disk_usage(path: str) -> tuple[int, int, int]:
+    """(процент занятого, всего байт, занято байт) для тома с path."""
     free_avail = ctypes.c_ulonglong(0)
     total = ctypes.c_ulonglong(0)
     total_free = ctypes.c_ulonglong(0)
@@ -191,7 +191,59 @@ def read_disk(path: str) -> tuple[int, int]:
     total_bytes = total.value
     used = total_bytes - total_free.value
     percent = round(100 * used / total_bytes) if total_bytes else 0
-    return percent, total_bytes
+    return percent, total_bytes, used
+
+
+def read_disk(path: str) -> tuple[int, int]:
+    """(процент занятого, всего байт) для тома, которому принадлежит path."""
+    percent, total, _ = _disk_usage(path)
+    return percent, total
+
+
+def read_disks() -> list[dict[str, object]]:
+    """Все фиксированные диски системы (C:, D:, …). Сетевые/съёмные/CD — мимо."""
+    _DRIVE_FIXED = 3
+    disks: list[dict[str, object]] = []
+    bitmask = _kernel32.GetLogicalDrives()
+    for i in range(26):
+        if not (bitmask >> i) & 1:
+            continue
+        root = f"{chr(65 + i)}:\\"
+        if _kernel32.GetDriveTypeW(ctypes.c_wchar_p(root)) != _DRIVE_FIXED:
+            continue
+        try:
+            percent, total, used = _disk_usage(root)
+        except OSError:
+            continue
+        disks.append({"name": f"{chr(65 + i)}:", "percent": percent, "totalBytes": total, "usedBytes": used})
+    return disks
+
+
+def read_cpu_temp() -> float | None:
+    """Best-effort температура CPU через ACPI-датчик (WMI MSAcpi_ThermalZoneTemperature).
+    На многих платах датчик недоступен/врёт — тогда None (это норма для Windows;
+    точная температура CPU требует LibreHardwareMonitor и т.п., которые мы не тянем)."""
+    try:
+        proc = subprocess.run(
+            [
+                "powershell", "-NoProfile", "-Command",
+                "(Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature "
+                "-ErrorAction Stop | Select-Object -First 1 -ExpandProperty CurrentTemperature)",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=6,
+            creationflags=_NO_WINDOW,
+        )
+        out = proc.stdout.strip()
+        if proc.returncode != 0 or not out:
+            return None
+        celsius = float(out.splitlines()[0]) / 10 - 273.15
+        if celsius <= 0 or celsius >= 125:
+            return None  # явно мусорное значение датчика
+        return round(celsius, 1)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
 
 
 def read_uptime() -> int:
@@ -233,28 +285,43 @@ cpu = CpuSampler()
 
 def collect() -> dict[str, object]:
     ram_pct, ram_total = read_memory()
-    disk_pct, disk_total = read_disk(DISK_PATH)
+    disks = read_disks()
     gpu = read_gpu()
-    has_temp = gpu is not None
-    temp = gpu["gpuTemp"] if has_temp else 0
+    cpu_temp = read_cpu_temp()
+    gpu_temp = gpu["gpuTemp"] if gpu is not None else None
+
+    # legacy disk/diskTotalBytes — системный том (DISK_PATH), иначе самый полный.
+    try:
+        disk_pct, disk_total = read_disk(DISK_PATH)
+    except OSError:
+        if disks:
+            primary = max(disks, key=lambda d: d["percent"])
+            disk_pct, disk_total = int(primary["percent"]), int(primary["totalBytes"])
+        else:
+            disk_pct, disk_total = 0, 0
+
+    legacy_temp = cpu_temp if cpu_temp is not None else gpu_temp
 
     metrics: dict[str, object] = {
         "state": "online",
         "cpu": cpu.percent(),
         "ram": ram_pct,
         "disk": disk_pct,
-        "temperature": temp,
+        "disks": disks,
+        "temperature": legacy_temp if legacy_temp is not None else 0,
         "uptimeSec": read_uptime(),
         "hostname": socket.gethostname(),
         "cores": os.cpu_count(),
         "loadAvg": [],  # у Windows нет loadavg — приложение это переживает
         "ramTotalBytes": ram_total,
         "diskTotalBytes": disk_total,
-        "hasTemperature": has_temp,
+        "hasTemperature": legacy_temp is not None,
         "canWake": WAKE_ENABLED,
     }
+    if cpu_temp is not None:
+        metrics["cpuTemp"] = cpu_temp
     if gpu is not None:
-        # Доп. поля для будущего GPU-виджета; текущее приложение их игнорирует.
+        # gpuTemp + доп. поля gpu/vram* (текущий UI показывает только gpuTemp).
         metrics.update(gpu)
     return metrics
 
@@ -272,10 +339,22 @@ def compute_alerts(m: dict[str, object]) -> list[dict[str, str]]:
         add("cpu", "warning", f"Процессор загружен на {m['cpu']}%")
     if m["ram"] >= cfg["ram"]:
         add("ram", "warning", f"Память заполнена на {m['ram']}%")
-    if m["disk"] >= cfg["disk"]:
+
+    disks = m.get("disks") or []
+    if disks:
+        for d in disks:
+            if d["percent"] >= cfg["disk"]:
+                add(f"disk:{d['name']}", "warning", f"Диск {d['name']} заполнен на {d['percent']}%")
+    elif m["disk"] >= cfg["disk"]:
         add("disk", "warning", f"Диск заполнен на {m['disk']}%")
-    if m["hasTemperature"] and m["temperature"] >= cfg["temperature"]:
-        add("temperature", "warning", f"Температура GPU {m['temperature']}°C")
+
+    cpu_temp = m.get("cpuTemp")
+    if cpu_temp is not None and cpu_temp >= cfg["temperature"]:
+        add("temperature-cpu", "warning", f"Температура ЦП {cpu_temp}°C")
+
+    gpu_temp = m.get("gpuTemp")
+    if gpu_temp is not None and gpu_temp >= cfg["temperature"]:
+        add("temperature-gpu", "warning", f"Температура ГП {gpu_temp}°C")
 
     return alerts
 

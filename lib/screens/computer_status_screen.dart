@@ -304,6 +304,22 @@ class _Metrics extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+
+    // Диски: список от свежего агента; у старого — единственный из legacy-поля.
+    final disks = metrics.disks.isNotEmpty
+        ? metrics.disks
+        : [DiskInfo(name: 'Диск', percent: metrics.disk, totalBytes: metrics.diskTotalBytes)];
+    final multiDisk = disks.length > 1;
+
+    // Температуры: ЦП и ГП по отдельности, иначе один legacy-показатель.
+    final temps = <({String label, double value})>[
+      if (metrics.cpuTemp != null) (label: 'ЦП', value: metrics.cpuTemp!),
+      if (metrics.gpuTemp != null) (label: 'ГП', value: metrics.gpuTemp!),
+    ];
+    if (temps.isEmpty && metrics.hasTemperature) {
+      temps.add((label: 'Температура', value: metrics.temperature));
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -319,28 +335,49 @@ class _Metrics extends StatelessWidget {
         _MetricBar(icon: Icons.memory, label: 'Процессор', value: metrics.cpu),
         const SizedBox(height: 10),
         _MetricBar(icon: Icons.dashboard, label: 'Память', value: metrics.ram),
-        const SizedBox(height: 10),
-        _MetricBar(icon: Icons.sd_storage, label: 'Диск', value: metrics.disk),
-        if (metrics.hasTemperature) ...[
-          const Divider(height: 24),
-          Row(
-            children: [
-              Icon(Icons.device_thermostat, size: 16, color: scheme.onSurfaceVariant),
-              const SizedBox(width: 8),
-              const Text('Температура'),
-              const Spacer(),
-              Text(
-                '${metrics.temperature.toStringAsFixed(0)}°C',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: metrics.temperature >= 70
-                      ? Theme.of(context).extension<StatusColors>()!.warning
-                      : scheme.onSurface,
-                ),
-              ),
-            ],
+        for (final d in disks) ...[
+          const SizedBox(height: 10),
+          _MetricBar(
+            icon: Icons.sd_storage,
+            label: multiDisk ? 'Диск ${d.name}' : 'Диск',
+            value: d.percent,
+            note: d.totalBytes != null ? formatBytes(d.totalBytes!) : null,
           ),
         ],
+        if (temps.isNotEmpty) ...[
+          const Divider(height: 24),
+          for (var i = 0; i < temps.length; i++) ...[
+            if (i > 0) const SizedBox(height: 8),
+            _TempRow(label: temps[i].label, value: temps[i].value),
+          ],
+        ],
+      ],
+    );
+  }
+}
+
+class _TempRow extends StatelessWidget {
+  const _TempRow({required this.label, required this.value});
+  final String label;
+  final double value;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final warning = Theme.of(context).extension<StatusColors>()!.warning;
+    return Row(
+      children: [
+        Icon(Icons.device_thermostat, size: 16, color: scheme.onSurfaceVariant),
+        const SizedBox(width: 8),
+        Text(label),
+        const Spacer(),
+        Text(
+          '${value.toStringAsFixed(0)}°C',
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: value >= 70 ? warning : scheme.onSurface,
+          ),
+        ),
       ],
     );
   }
@@ -422,11 +459,12 @@ class _NextcloudCard extends StatelessWidget {
 }
 
 class _MetricBar extends StatelessWidget {
-  const _MetricBar({required this.icon, required this.label, required this.value});
+  const _MetricBar({required this.icon, required this.label, required this.value, this.note});
 
   final IconData icon;
   final String label;
   final int value;
+  final String? note;
 
   @override
   Widget build(BuildContext context) {
@@ -439,7 +477,11 @@ class _MetricBar extends StatelessWidget {
           children: [
             Icon(icon, size: 15, color: scheme.onSurfaceVariant),
             const SizedBox(width: 8),
-            Text(label, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13)),
+            Flexible(child: Text(label, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13), overflow: TextOverflow.ellipsis)),
+            if (note != null) ...[
+              const SizedBox(width: 8),
+              Text(note!, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11)),
+            ],
             const Spacer(),
             Text('$value%',
                 style: TextStyle(
