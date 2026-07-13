@@ -272,6 +272,66 @@ def read_disk(path: str) -> tuple[int, int]:
     return percent, total
 
 
+# Псевдо-ФС и виртуальные точки — не физические диски, в список не берём.
+_PSEUDO_FS = {
+    "proc", "sysfs", "tmpfs", "devtmpfs", "devpts", "cgroup", "cgroup2",
+    "overlay", "squashfs", "mqueue", "hugetlbfs", "debugfs", "tracefs",
+    "securityfs", "pstore", "bpf", "autofs", "binfmt_misc", "fusectl",
+    "configfs", "ramfs", "nsfs", "efivarfs", "fuse.gvfsd-fuse", "rpc_pipefs",
+}
+
+
+def _unescape_mount(path: str) -> str:
+    """/proc/mounts экранирует пробел как \\040, таб \\011 и т.д. — вернём как есть."""
+    return (
+        path.replace("\\040", " ")
+        .replace("\\011", "\t")
+        .replace("\\012", "\n")
+        .replace("\\134", "\\")
+    )
+
+
+def read_disks() -> list[dict[str, object]]:
+    """Все физические тома из /proc/mounts: реальные /dev-устройства, без
+    псевдо-ФС, loop-устройств (snap) и повторов одного устройства."""
+    try:
+        with open("/proc/mounts") as f:
+            lines = f.readlines()
+    except OSError:
+        return []
+
+    seen: set[str] = set()
+    disks: list[dict[str, object]] = []
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        device, mount_raw, fstype = parts[0], parts[1], parts[2]
+        if not device.startswith("/dev/") or device.startswith("/dev/loop"):
+            continue
+        if fstype in _PSEUDO_FS or device in seen:
+            continue
+        mount = _unescape_mount(mount_raw)
+        try:
+            st = os.statvfs(mount)
+        except OSError:
+            continue
+        total = st.f_blocks * st.f_frsize
+        if total == 0:
+            continue
+        free_root = st.f_bfree * st.f_frsize
+        free_user = st.f_bavail * st.f_frsize
+        used = total - free_root
+        denom = used + free_user
+        percent = round(100 * used / denom) if denom else 0
+        seen.add(device)
+        disks.append({"name": mount, "percent": percent, "totalBytes": total, "usedBytes": used})
+
+    # Корень первым, затем по алфавиту — стабильный порядок в приложении.
+    disks.sort(key=lambda d: (d["name"] != "/", d["name"]))
+    return disks
+
+
 def read_uptime() -> int:
     with open("/proc/uptime") as f:
         return int(float(f.readline().split()[0]))
@@ -312,30 +372,79 @@ def read_temperature() -> float | None:
     return None
 
 
+def read_gpu() -> dict[str, object] | None:
+    """Температура/загрузка/VRAM GPU через nvidia-smi (идёт с драйвером NVIDIA).
+    None, если видеокарты/утилиты нет — тогда GPU-поля просто не отдаются."""
+    try:
+        proc = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=temperature.gpu,utilization.gpu,memory.used,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return None
+        first = proc.stdout.strip().splitlines()[0]
+        temp, util, mem_used, mem_total = [p.strip() for p in first.split(",")]
+        return {
+            "gpuTemp": round(float(temp), 1),
+            "gpu": round(float(util)),
+            "vramUsedBytes": int(float(mem_used)) * 1024 * 1024,
+            "vramTotalBytes": int(float(mem_total)) * 1024 * 1024,
+        }
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
 cpu = CpuSampler()
 
 
 def collect() -> dict[str, object]:
     ram_pct, ram_total = read_memory()
-    disk_pct, disk_total = read_disk(DISK_PATH)
-    temp = read_temperature()
+    disks = read_disks()
+    cpu_temp = read_temperature()
+    gpu = read_gpu()
+    gpu_temp = gpu["gpuTemp"] if gpu is not None else None
     load1, load5, load15 = os.getloadavg()
 
-    return {
+    # legacy-поля disk/diskTotalBytes — для старых версий приложения: корень,
+    # иначе самый заполненный том, иначе прямое чтение DISK_PATH.
+    if disks:
+        primary = next((d for d in disks if d["name"] == "/"), max(disks, key=lambda d: d["percent"]))
+        disk_pct, disk_total = int(primary["percent"]), int(primary["totalBytes"])
+    else:
+        disk_pct, disk_total = read_disk(DISK_PATH)
+
+    # temperature (одно число) — для старого UI: ЦП, иначе ГП.
+    legacy_temp = cpu_temp if cpu_temp is not None else gpu_temp
+
+    result: dict[str, object] = {
         "state": "online",
         "cpu": cpu.percent(),
         "ram": ram_pct,
         "disk": disk_pct,
-        "temperature": temp if temp is not None else 0,
+        "disks": disks,
+        "temperature": legacy_temp if legacy_temp is not None else 0,
         "uptimeSec": read_uptime(),
         "hostname": os.uname().nodename,
         "cores": os.cpu_count(),
         "loadAvg": [round(load1, 2), round(load5, 2), round(load15, 2)],
         "ramTotalBytes": ram_total,
         "diskTotalBytes": disk_total,
-        "hasTemperature": temp is not None,
+        "hasTemperature": legacy_temp is not None,
         "canWake": WAKE_ENABLED,
     }
+    if cpu_temp is not None:
+        result["cpuTemp"] = cpu_temp
+    if gpu is not None:
+        # gpuTemp + загрузка gpu + vram*; текущий UI показывает температуру,
+        # загрузку и видеопамять.
+        result.update(gpu)
+    return result
 
 
 def compute_alerts(m: dict[str, object], thresholds: dict[str, float]) -> list[dict[str, str]]:
@@ -355,12 +464,21 @@ def compute_alerts(m: dict[str, object], thresholds: dict[str, float]) -> list[d
     if ram >= thresholds["ram"]:
         add("ram", "warning", f"Память заполнена на {ram}%")
 
-    disk = m["disk"]
-    if disk >= thresholds["disk"]:
-        add("disk", "warning", f"Диск заполнен на {disk}%")
+    disks = m.get("disks") or []
+    if disks:
+        for d in disks:
+            if d["percent"] >= thresholds["disk"]:
+                add(f"disk:{d['name']}", "warning", f"Диск {d['name']} заполнен на {d['percent']}%")
+    elif m["disk"] >= thresholds["disk"]:
+        add("disk", "warning", f"Диск заполнен на {m['disk']}%")
 
-    if m["hasTemperature"] and m["temperature"] >= thresholds["temperature"]:
-        add("temperature", "warning", f"Температура процессора {m['temperature']}°C")
+    cpu_temp = m.get("cpuTemp")
+    if cpu_temp is not None and cpu_temp >= thresholds["temperature"]:
+        add("temperature-cpu", "warning", f"Температура ЦП {cpu_temp}°C")
+
+    gpu_temp = m.get("gpuTemp")
+    if gpu_temp is not None and gpu_temp >= thresholds["temperature"]:
+        add("temperature-gpu", "warning", f"Температура ГП {gpu_temp}°C")
 
     return alerts
 
@@ -666,7 +784,9 @@ class Handler(BaseHTTPRequestHandler):
         device = parse_qs(parsed.query).get("device", [None])[0]
 
         if path == "/health":
-            self._json(200, {"status": "ok"})
+            # hostname — чтобы поиск в приложении показывал имя, а не голый IP.
+            # Без токена: имя хоста некритично, зато удобно при обнаружении.
+            self._json(200, {"status": "ok", "hostname": os.uname().nodename})
             return
 
         if not self._authorized():

@@ -16,10 +16,13 @@ class WakeOnLanScreen extends StatelessWidget {
     final result = await ComputerFormSheet.show(
       context,
       title: existing == null ? 'Добавить компьютер' : 'Изменить компьютер',
-      hostLabel: 'Broadcast',
-      hostHint: '192.168.1.255',
+      hostLabel: 'Broadcast / внешний адрес',
+      hostHint: '192.168.1.255 или host.duckdns.org',
+      hostHelper: 'Дома — broadcast подсети. Из интернета — DDNS/публичный адрес '
+          'и проброшенный на роутере порт (проброс на IP машины + статический ARP).',
       submitLabel: existing == null ? 'Добавить' : 'Сохранить',
       withMac: true,
+      withDirectToggle: true,
       defaultPort: 9,
       initial: existing == null
           ? null
@@ -28,15 +31,29 @@ class WakeOnLanScreen extends StatelessWidget {
               host: existing.broadcast,
               port: existing.port,
               mac: existing.mac,
+              directSend: existing.directSend,
             ),
     );
     if (result == null) return;
 
     if (existing == null) {
-      wol.add(name: result.name, mac: result.mac!, broadcast: result.host, port: result.port);
+      wol.add(
+        name: result.name,
+        mac: result.mac!,
+        broadcast: result.host,
+        port: result.port,
+        directSend: result.directSend,
+      );
       _toast(context, '${result.name} добавлен');
     } else {
-      wol.update(existing.id, name: result.name, mac: result.mac!, broadcast: result.host, port: result.port);
+      wol.update(
+        existing.id,
+        name: result.name,
+        mac: result.mac!,
+        broadcast: result.host,
+        port: result.port,
+        directSend: result.directSend,
+      );
       _toast(context, '${result.name} сохранён');
     }
   }
@@ -162,7 +179,31 @@ class _WolCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            Text('Адрес: ${target.broadcast}:${target.port}', style: mono.copyWith(color: scheme.onSurfaceVariant)),
+            Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    'Адрес: ${target.broadcast}:${target.port}',
+                    style: mono.copyWith(color: scheme.onSurfaceVariant),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (target.directSend) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: scheme.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'WAN · напрямую',
+                      style: TextStyle(fontSize: 11, color: scheme.primary, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ],
+            ),
             const SizedBox(height: 2),
             Row(
               children: [

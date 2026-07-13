@@ -1,0 +1,111 @@
+name: Build iOS (unsigned IPA)
+
+# Собирает НЕПОДПИСАННЫЙ .ipa для сайдлоада через AltStore/SideStore.
+# AltStore сам переподписывает приложение вашим Apple ID при установке,
+# поэтому Apple Developer Program не нужен.
+#
+# Папка ios/ в репозитории не хранится — она генерируется здесь на лету
+# (`flutter create`), затем патчатся Info.plist (ATS, локальная сеть, микрофон),
+# минимальная версия iOS и иконка. Так сборка воспроизводима и не требует Mac
+# под рукой.
+#
+# Запуск: вручную (Actions → Build iOS → Run workflow) или при пуше в main.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/**'
+      - 'assets/**'
+      - 'native/ios/**'
+      - 'pubspec.yaml'
+      - '.github/workflows/build-ios.yml'
+
+env:
+  # Должно совпадать с applicationId Android (com.kekw2077.evs_remote).
+  BUNDLE_ID: com.kekw2077.evs_remote
+  APP_NAME: Nexus
+  # Firebase (firebase_messaging 16.x) требует современный минимум iOS.
+  IOS_DEPLOYMENT_TARGET: '15.0'
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.6
+          cache: true
+
+      - run: flutter --version
+
+      # Генерируем платформенную папку ios/ (lib/, pubspec.yaml не трогает).
+      - name: Сгенерировать проект iOS
+        run: |
+          flutter create \
+            --platforms=ios \
+            --org com.kekw2077 \
+            --project-name evs_remote \
+            .
+
+      - run: flutter pub get
+
+      # Иконка приложения (AppIcon.appiconset) из assets/icon по pubspec-конфигу.
+      - name: Иконка приложения
+        run: dart run flutter_launcher_icons
+
+      - name: Патч Info.plist и минимальной версии iOS
+        run: |
+          PLIST=ios/Runner/Info.plist
+          pb() { /usr/libexec/PlistBuddy -c "$1" "$PLIST"; }
+
+          # Имя приложения на домашнем экране.
+          pb "Set :CFBundleDisplayName ${APP_NAME}" || pb "Add :CFBundleDisplayName string ${APP_NAME}"
+
+          # ATS: агент отвечает по http:// (LAN и Tailscale), не https.
+          pb "Delete :NSAppTransportSecurity" 2>/dev/null || true
+          pb "Add :NSAppTransportSecurity dict"
+          pb "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true"
+
+          # iOS 14+: доступ к локальной сети (UDP WoL + LAN-агенты).
+          pb "Add :NSLocalNetworkUsageDescription string Для управления компьютерами в вашей локальной сети" 2>/dev/null \
+            || pb "Set :NSLocalNetworkUsageDescription Для управления компьютерами в вашей локальной сети"
+
+          # Микрофон (голосовой ввод EVS).
+          pb "Add :NSMicrophoneUsageDescription string Для голосового управления через EVS" 2>/dev/null \
+            || pb "Set :NSMicrophoneUsageDescription Для голосового управления через EVS"
+
+          echo "--- Info.plist ---"
+          plutil -p "$PLIST"
+
+          # Минимальная версия iOS: Podfile + все таргеты в проекте.
+          if grep -q "platform :ios" ios/Podfile; then
+            sed -i '' "s/# *platform :ios.*/platform :ios, '${IOS_DEPLOYMENT_TARGET}'/" ios/Podfile
+          else
+            printf "\nplatform :ios, '%s'\n" "${IOS_DEPLOYMENT_TARGET}" >> ios/Podfile
+          fi
+          sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = ${IOS_DEPLOYMENT_TARGET};/g" \
+            ios/Runner.xcodeproj/project.pbxproj
+
+      - name: Сборка без подписи
+        run: flutter build ios --release --no-codesign
+
+      # Упаковка .app в Payload/…/.ipa — стандартный приём для неподписанного ipa.
+      - name: Упаковать IPA
+        run: |
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -R Runner.app Payload/Runner.app
+          zip -qr nexus-unsigned.ipa Payload
+          echo "IPA: $(du -h nexus-unsigned.ipa | cut -f1)"
+
+      - name: Загрузить IPA как артефакт
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ios-ipa
+          path: build/ios/iphoneos/nexus-unsigned.ipa
+          if-no-files-found: error

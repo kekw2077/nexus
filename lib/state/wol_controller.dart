@@ -49,16 +49,42 @@ class WolController extends ChangeNotifier {
     _store.setString(_key, jsonEncode(_items.map((t) => t.toJson()).toList()));
   }
 
-  void add({required String name, required String mac, required String broadcast, required int port}) {
-    _items.add(WolTarget(id: newId(), name: name, mac: mac, broadcast: broadcast, port: port));
+  void add({
+    required String name,
+    required String mac,
+    required String broadcast,
+    required int port,
+    bool directSend = false,
+  }) {
+    _items.add(WolTarget(
+      id: newId(),
+      name: name,
+      mac: mac,
+      broadcast: broadcast,
+      port: port,
+      directSend: directSend,
+    ));
     _persist();
     notifyListeners();
   }
 
-  void update(String id, {required String name, required String mac, required String broadcast, required int port}) {
+  void update(
+    String id, {
+    required String name,
+    required String mac,
+    required String broadcast,
+    required int port,
+    bool directSend = false,
+  }) {
     final i = _items.indexWhere((t) => t.id == id);
     if (i == -1) return;
-    _items[i] = _items[i].copyWith(name: name, mac: mac, broadcast: broadcast, port: port);
+    _items[i] = _items[i].copyWith(
+      name: name,
+      mac: mac,
+      broadcast: broadcast,
+      port: port,
+      directSend: directSend,
+    );
     _persist();
     notifyListeners();
   }
@@ -76,7 +102,9 @@ class WolController extends ChangeNotifier {
 
     WakeOutcome outcome;
     try {
-      if (relay != null && relay.usable) {
+      // directSend минует ретранслятор — обязательно для WAN-цели (DDNS/публичный
+      // адрес): релей бродкастил бы это имя в свою LAN, что бессмысленно.
+      if (relay != null && relay.usable && !target.directSend) {
         final error = await _agent.wake(
           relay.host,
           relay.port,

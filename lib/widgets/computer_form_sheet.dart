@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/input_formatters.dart';
 import '../core/theme.dart';
 import '../core/validators.dart';
 
@@ -10,6 +11,8 @@ class ComputerFormResult {
     required this.host,
     required this.port,
     this.mac,
+    this.broadcast,
+    this.directSend = false,
     this.token,
     this.cpuThreshold,
     this.ramThreshold,
@@ -21,6 +24,8 @@ class ComputerFormResult {
   final String host;
   final int port;
   final String? mac;
+  final String? broadcast;
+  final bool directSend;
   final String? token;
   final int? cpuThreshold;
   final int? ramThreshold;
@@ -42,8 +47,11 @@ abstract final class ComputerFormSheet {
     required String submitLabel,
     bool withMac = false,
     bool withToken = false,
+    bool withBroadcast = false,
+    bool withDirectToggle = false,
     bool macOptional = false,
     int defaultPort = 8765,
+    String? hostHelper,
     ComputerFormResult? initial,
   }) {
     return showModalBottomSheet<ComputerFormResult>(
@@ -59,8 +67,11 @@ abstract final class ComputerFormSheet {
           submitLabel: submitLabel,
           withMac: withMac,
           withToken: withToken,
+          withBroadcast: withBroadcast,
+          withDirectToggle: withDirectToggle,
           macOptional: macOptional,
           defaultPort: defaultPort,
+          hostHelper: hostHelper,
           initial: initial,
         ),
       ),
@@ -76,8 +87,11 @@ class _FormBody extends StatefulWidget {
     required this.submitLabel,
     required this.withMac,
     required this.withToken,
+    required this.withBroadcast,
+    required this.withDirectToggle,
     required this.macOptional,
     required this.defaultPort,
+    required this.hostHelper,
     required this.initial,
   });
 
@@ -87,8 +101,11 @@ class _FormBody extends StatefulWidget {
   final String submitLabel;
   final bool withMac;
   final bool withToken;
+  final bool withBroadcast;
+  final bool withDirectToggle;
   final bool macOptional;
   final int defaultPort;
+  final String? hostHelper;
   final ComputerFormResult? initial;
 
   @override
@@ -99,6 +116,7 @@ class _FormBodyState extends State<_FormBody> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _name;
   late final TextEditingController _mac;
+  late final TextEditingController _broadcast;
   late final TextEditingController _host;
   late final TextEditingController _port;
   late final TextEditingController _token;
@@ -106,13 +124,16 @@ class _FormBodyState extends State<_FormBody> {
   late final TextEditingController _ramThreshold;
   late final TextEditingController _diskThreshold;
   late final TextEditingController _tempThreshold;
+  late bool _directSend;
 
   @override
   void initState() {
     super.initState();
     final i = widget.initial;
+    _directSend = i?.directSend ?? false;
     _name = TextEditingController(text: i?.name ?? '');
     _mac = TextEditingController(text: i?.mac ?? '');
+    _broadcast = TextEditingController(text: i?.broadcast ?? '');
     _host = TextEditingController(text: i?.host ?? '');
     _port = TextEditingController(text: (i?.port ?? widget.defaultPort).toString());
     _token = TextEditingController(text: i?.token ?? '');
@@ -126,6 +147,7 @@ class _FormBodyState extends State<_FormBody> {
   void dispose() {
     _name.dispose();
     _mac.dispose();
+    _broadcast.dispose();
     _host.dispose();
     _port.dispose();
     _token.dispose();
@@ -141,15 +163,25 @@ class _FormBodyState extends State<_FormBody> {
     return validateMac(v);
   }
 
+  /// Broadcast опционален: пусто — используем значение по умолчанию.
+  String? _validateBroadcastField(String? v) {
+    final t = v?.trim() ?? '';
+    if (t.isEmpty) return null;
+    return validateHost(t);
+  }
+
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
     final macText = _mac.text.trim();
+    final broadcastText = _broadcast.text.trim();
     Navigator.of(context).pop(
       ComputerFormResult(
         name: _name.text.trim(),
         host: _host.text.trim(),
         port: int.parse(_port.text.trim()),
         mac: widget.withMac && macText.isNotEmpty ? normalizeMac(macText) : null,
+        broadcast: widget.withBroadcast && broadcastText.isNotEmpty ? broadcastText : null,
+        directSend: widget.withDirectToggle && _directSend,
         token: widget.withToken ? _token.text : null,
         cpuThreshold: widget.withToken ? int.tryParse(_cpuThreshold.text.trim()) : null,
         ramThreshold: widget.withToken ? int.tryParse(_ramThreshold.text.trim()) : null,
@@ -190,9 +222,26 @@ class _FormBodyState extends State<_FormBody> {
                   hintText: '00:1A:2B:3C:4D:5E',
                 ),
                 autocorrect: false,
-                textCapitalization: TextCapitalization.characters,
+                keyboardType: TextInputType.visiblePassword,
+                inputFormatters: [MacInputFormatter()],
                 style: mono,
                 validator: _validateMacField,
+              ),
+            ],
+            if (widget.withBroadcast) ...[
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _broadcast,
+                decoration: const InputDecoration(
+                  labelText: 'Broadcast (для включения)',
+                  hintText: '192.168.1.255',
+                  helperText: 'Пусто — 255.255.255.255. Надёжнее указать broadcast своей подсети.',
+                  helperMaxLines: 2,
+                ),
+                autocorrect: false,
+                keyboardType: TextInputType.url,
+                style: mono,
+                validator: _validateBroadcastField,
               ),
             ],
             const SizedBox(height: 14),
@@ -202,7 +251,12 @@ class _FormBodyState extends State<_FormBody> {
                 Expanded(
                   child: TextFormField(
                     controller: _host,
-                    decoration: InputDecoration(labelText: widget.hostLabel, hintText: widget.hostHint),
+                    decoration: InputDecoration(
+                      labelText: widget.hostLabel,
+                      hintText: widget.hostHint,
+                      helperText: widget.hostHelper,
+                      helperMaxLines: 3,
+                    ),
                     autocorrect: false,
                     keyboardType: TextInputType.url,
                     style: mono,
@@ -222,6 +276,21 @@ class _FormBodyState extends State<_FormBody> {
                 ),
               ],
             ),
+            if (widget.withDirectToggle) ...[
+              const SizedBox(height: 6),
+              SwitchListTile(
+                value: _directSend,
+                onChanged: (v) => setState(() => _directSend = v),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Напрямую, минуя ретранслятор'),
+                subtitle: Text(
+                  'Для пробуждения из интернета (адрес — DDNS/публичный, '
+                  'порт — проброшенный на роутере). Иначе используется '
+                  'ретранслятор, если он включён.',
+                  style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ),
+            ],
             if (widget.withToken) ...[
               const SizedBox(height: 14),
               TextFormField(

@@ -38,4 +38,9 @@ flutter_launcher_icons:
   adaptive_icon_background: "assets/icon/icon_background.png"
   adaptive_icon_foreground: "assets/icon/icon_foreground.png"
   min_sdk_android: 24
+  # iOS запрещает прозрачность в иконке и сам скругляет углы (маска-суперэллипс).
+  # Мастер нарисован скруглённым (rx=224) — прозрачные углы заливаем тёмным
+  # фоном контейнера. Его радиус ≈ маске iOS, поэтому заливка попадает точно
+  # в обрезаемую зону и на готовой иконке не видна.
   remove_alpha_ios: true
+  background_color_ios: "#0B1120"
