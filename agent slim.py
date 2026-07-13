@@ -276,19 +276,30 @@ def read_temperature() -> float | None:
     return None
 
 
-def read_gpu_temp() -> float | None:
-    """Температура GPU через nvidia-smi (идёт с драйвером NVIDIA). None, если
-    видеокарты/утилиты нет — тогда gpuTemp просто не отдаётся."""
+def read_gpu() -> dict[str, object] | None:
+    """Температура/загрузка/VRAM GPU через nvidia-smi (идёт с драйвером NVIDIA).
+    None, если видеокарты/утилиты нет — тогда GPU-поля просто не отдаются."""
     try:
         proc = subprocess.run(
-            ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
+            [
+                "nvidia-smi",
+                "--query-gpu=temperature.gpu,utilization.gpu,memory.used,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
             capture_output=True,
             text=True,
             timeout=5,
         )
         if proc.returncode != 0 or not proc.stdout.strip():
             return None
-        return round(float(proc.stdout.strip().splitlines()[0]), 1)
+        first = proc.stdout.strip().splitlines()[0]
+        temp, util, mem_used, mem_total = [p.strip() for p in first.split(",")]
+        return {
+            "gpuTemp": round(float(temp), 1),
+            "gpu": round(float(util)),
+            "vramUsedBytes": int(float(mem_used)) * 1024 * 1024,
+            "vramTotalBytes": int(float(mem_total)) * 1024 * 1024,
+        }
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
 
@@ -300,7 +311,8 @@ def collect() -> dict[str, object]:
     ram_pct, ram_total = read_memory()
     disks = read_disks()
     cpu_temp = read_temperature()
-    gpu_temp = read_gpu_temp()
+    gpu = read_gpu()
+    gpu_temp = gpu["gpuTemp"] if gpu is not None else None
     load1, load5, load15 = os.getloadavg()
 
     # legacy-поля disk/diskTotalBytes — для старых версий приложения: корень,
@@ -332,8 +344,10 @@ def collect() -> dict[str, object]:
     }
     if cpu_temp is not None:
         result["cpuTemp"] = cpu_temp
-    if gpu_temp is not None:
-        result["gpuTemp"] = gpu_temp
+    if gpu is not None:
+        # gpuTemp + загрузка gpu + vram*; текущий UI показывает температуру,
+        # загрузку и видеопамять.
+        result.update(gpu)
     return result
 
 

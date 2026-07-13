@@ -43,6 +43,9 @@ class HostMetrics {
     this.disks = const [],
     this.cpuTemp,
     this.gpuTemp,
+    this.gpuUtil,
+    this.vramUsedBytes,
+    this.vramTotalBytes,
     DateTime? checkedAt,
   }) : checkedAt = checkedAt ?? _epoch;
 
@@ -69,6 +72,11 @@ class HostMetrics {
   final double? cpuTemp;
   final double? gpuTemp;
 
+  /// Загрузка GPU в % и видеопамять в байтах (null — нет GPU/nvidia-smi).
+  final int? gpuUtil;
+  final int? vramUsedBytes;
+  final int? vramTotalBytes;
+
   final DateTime checkedAt;
 
   bool get isOnline => state == HostState.online;
@@ -92,6 +100,9 @@ class HostMetrics {
         disks = const [],
         cpuTemp = null,
         gpuTemp = null,
+        gpuUtil = null,
+        vramUsedBytes = null,
+        vramTotalBytes = null,
         checkedAt = _epoch;
 
   factory HostMetrics.fromJson(Map<String, dynamic> json) {
@@ -126,6 +137,9 @@ class HostMetrics {
       disks: disks,
       cpuTemp: (json['cpuTemp'] as num?)?.toDouble(),
       gpuTemp: (json['gpuTemp'] as num?)?.toDouble(),
+      gpuUtil: (json['gpu'] as num?)?.round(),
+      vramUsedBytes: (json['vramUsedBytes'] as num?)?.toInt(),
+      vramTotalBytes: (json['vramTotalBytes'] as num?)?.toInt(),
       checkedAt: DateTime.now(),
     );
   }

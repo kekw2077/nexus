@@ -229,9 +229,9 @@ New-NetFirewallRule -DisplayName "PC Agent" -Direction Inbound -Protocol TCP -Lo
 температура **GPU** (`gpuTemp`) — через `nvidia-smi`; температура **CPU**
 (`cpuTemp`) — best-effort через ACPI-датчик (WMI `MSAcpi_ThermalZoneTemperature`),
 на многих платах недоступна/врёт, тогда просто не отдаётся (точная температура
-CPU требует LibreHardwareMonitor и т.п., которые не тянем). Дополнительно —
-`gpu`, `vramUsedBytes`, `vramTotalBytes` (текущий UI показывает только
-температуры и диски). `loadAvg` пустой — в Windows его нет.
+CPU требует LibreHardwareMonitor и т.п., которые не тянем). Загрузка GPU
+(`gpu`, %) и видеопамять (`vramUsedBytes`/`vramTotalBytes`) тоже отдаются —
+приложение рисует их отдельными полосками. `loadAvg` пустой — в Windows его нет.
 
 **Метрики всех дисков и температур (обе платформы).** `/metrics` отдаёт массив
 `disks[]` со всеми физическими томами (Linux — реальные `/dev`-устройства из

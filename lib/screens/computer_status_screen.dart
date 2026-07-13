@@ -320,6 +320,12 @@ class _Metrics extends StatelessWidget {
       temps.add((label: 'Температура', value: metrics.temperature));
     }
 
+    // GPU: загрузка и видеопамять (если агент их отдаёт).
+    final hasGpuLoad = metrics.gpuUtil != null;
+    final vramTotal = metrics.vramTotalBytes ?? 0;
+    final hasVram = vramTotal > 0 && metrics.vramUsedBytes != null;
+    final vramPercent = hasVram ? (100 * metrics.vramUsedBytes! / vramTotal).round() : 0;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -342,6 +348,19 @@ class _Metrics extends StatelessWidget {
             label: multiDisk ? 'Диск ${d.name}' : 'Диск',
             value: d.percent,
             note: d.totalBytes != null ? formatBytes(d.totalBytes!) : null,
+          ),
+        ],
+        if (hasGpuLoad) ...[
+          const SizedBox(height: 10),
+          _MetricBar(icon: Icons.developer_board, label: 'Видеокарта', value: metrics.gpuUtil!),
+        ],
+        if (hasVram) ...[
+          const SizedBox(height: 10),
+          _MetricBar(
+            icon: Icons.storage,
+            label: 'Видеопамять',
+            value: vramPercent,
+            note: '${formatBytes(metrics.vramUsedBytes!)} / ${formatBytes(vramTotal)}',
           ),
         ],
         if (temps.isNotEmpty) ...[
