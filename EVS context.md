@@ -170,7 +170,8 @@ HTTP-агент на каждой отслеживаемой машине (Linux
 - Тёмный контейнер `#111A2E → #080D1A`, акцент cyan→blue→violet (`#4EE3D2 · #4C7DF0 · #8B6CF0`)
 - Знак: центральный узел-хаб + шесть машин, одна в алерте — янтарь `#FFB454` (кодирует мониторинг состояния)
 - Мастер 1024×1024; растеризован в `assets/icon/icon.png` (full-bleed), `icon_background.png` и `icon_foreground.png` (safe-zone, scale 0.88 от центра)
-- `flutter_launcher_icons` подключён в `pubspec.yaml` (android+ios, `min_sdk_android: 24`, `remove_alpha_ios: true`) и прогнан — адаптивная иконка Android и iOS-иконка сгенерированы в `android/`/`ios/` (не в репозитории, см. ниже)
+- `flutter_launcher_icons` подключён в `pubspec.yaml` (android+ios, `min_sdk_android: 24`, `remove_alpha_ios: true`, `background_color_ios: "#0B1120"`) и прогнан — адаптивная иконка Android и iOS-иконка сгенерированы в `android/`/`ios/` (не в репозитории, см. ниже)
+- **iOS-скругление (2026-07-13):** iOS сам накладывает маску-суперэллипс и запрещает прозрачность, поэтому «скруглять» PNG не надо — нужен full-bleed квадрат. `remove_alpha_ios` заливает прозрачные углы мастера цветом `background_color_ios`; радиус мастера (`rx=224`) ≈ маске iOS, так что заливка попадает в обрезаемую зону и не видна. Отдельный iOS-PNG не нужен.
 
 ### Что уже реально, что условно
 
@@ -178,11 +179,12 @@ HTTP-агент на каждой отслеживаемой машине (Linux
 - **Метрики и алерты** — реальный `fetch`, пороги per-host реально пушатся на агент.
 - **Мониторинг Nextcloud** — реальный `fetch` `status.php`+serverinfo на стороне агента, NC-блок в карточке + NC-алерты в общем потоке/push. Не проверено на реальном облаке (нужен сервер с Nextcloud); разбор ответа serverinfo защищённый, но структура зависит от версии NC — сверить при деплое (см. SERVER_DEPLOY.md §4.5).
 - **Push-уведомления** — Android полноценно (Firebase, брендировано под Nexus), iOS сознательно нет (см. README).
+- **iOS-сборка (2026-07-13)** — CI `build-ios.yml` на macOS-раннере: генерит `ios/` на лету, патчит Info.plist (ATS/локальная сеть/микрофон) + минимум iOS 15, собирает **неподписанный `.ipa`** для AltStore/SideStore (переподпись Apple ID на устройстве, без Developer Program). Ограничения free-подписи: push недоступен (APNs), переустановка раз в 7 дней. Не проверено вживую.
 - **Ретранслятор WoL** — доступен по HTTPS без Tailscale (нужна инфра на сервере).
 - **Визуализатор голоса** (`waveform.dart`) — реальный RMS из PCM16-потока микрофона (пакет `record`), не синтетика.
 - **Ничего из этого не проверено на реальном устройстве** — на машине разработки нет Android SDK и Visual Studio (см. «На чём остановились»); проверено только `flutter analyze`/`flutter test`/`python -m py_compile`.
 
-> Статус репозитория: 3 коммита (после текущего), релизов нет.
+> Статус репозитория: `main` активно развивается (WebSocket/RMS/алерты/push/Nextcloud/CI-APK), релизов нет. Текущая ветка разработки — `claude/file-instruction-review-2rhngz`.
 
 ---
 
@@ -217,7 +219,10 @@ HTTP-агент на каждой отслеживаемой машине (Linux
 - [x] Nexus: push-уведомления об алертах (заблокированный экран + обычные) — сделано 2026-07-11 (M3: watcher в `agent slim.py` → self-hosted ntfy → Firebase → `push_service.dart`, Android-only)
 - [x] Nexus: мониторинг состояния Nextcloud (статус + serverinfo + NC-алерты/push) — сделано 2026-07-12 (`GET /nextcloud`, `NextcloudStatus`, `_NextcloudCard`, `PC_AGENT_NC_*`)
 - [x] Nexus: отдельная вкладка «Облако» + occ-проверки (обновление ядра, предупреждения) + серверная техинфа — сделано 2026-07-12 (`cloud_status_screen.dart`, `PC_AGENT_NC_OCC`)
+- [x] Nexus: iOS-сборка под AltStore — сделано 2026-07-13 (CI `build-ios.yml`, неподписанный `.ipa`, iOS 15+, iOS-иконка через `background_color_ios`)
 - [ ] Nexus: собрать APK и проверить иконку/WebSocket/RMS/алерты/push/HTTPS-релей/Nextcloud на реальном телефоне (эта машина без Android SDK — отложено пользователем)
+- [ ] Nexus: проверить первый прогон iOS-сборки в Actions (Firebase-поды + iOS deployment target — возможны нюансы)
+- [ ] Nexus (обсуждается): правки формы добавления машин для мониторинга + поля ввода адреса; опция «пробуждение из интернета через роутер» (проброс порта / DDNS)
 - [ ] Деплой на сервере по `SERVER_DEPLOY.md`: агент systemd, ntfy-контейнер, Caddy на свободном порту, DNS A-записи, Firebase-проект + `google-services.json`, токен serverinfo для Nextcloud, проверить конфликт портов с Nextcloud AIO
 - [ ] Разделить «порог» и «включён ли этот тип алерта» — сейчас выключение алерта эмулируется завышением порога, отдельного чекбокса нет (не запрашивалось явно, но стоит уточнить у пользователя при следующей возможности)
 - [ ] (добавляй сюда по ходу работы)
@@ -236,3 +241,4 @@ HTTP-агент на каждой отслеживаемой машине (Linux
 - 2026-07-12 (3) — **CI-сборка APK через GitHub Actions** (`.github/workflows/build-apk.yml`, ручной запуск/пуш в main → артефакт `app-release.apk`, debug-подпись). Для этого папка `android/` **закоммичена и настроена** (в отличие от `ios/` — та по-прежнему генерируется): Gradle-плагин Google services (FCM), core library desugaring для `flutter_local_notifications`, `minSdk 24`, наш манифест с `POST_NOTIFICATIONS`, иконки Hub·Status. `google-services.json` в `.gitignore`, подставляется в CI из секрета `GOOGLE_SERVICES_JSON` (base64). `PushService.init()` в `main.dart` обёрнут в try/catch — сбой/отсутствие Firebase не роняет запуск. **Требует от пользователя:** создать Firebase-проект (Android app `com.kekw2077.evs_remote`), скачать `google-services.json`, добавить секрет — потом workflow соберёт push-capable APK. Выбран вариант «полная сборка с push» (не превью без Firebase).
 - 2026-07-12 (2) — **отдельная вкладка «Облако»** (`cloud_status_screen.dart`, 5-я в `RootShell`): полный дашборд Nextcloud. Агент расширен: серверная техинфа из serverinfo (PHP/БД+размер/веб-сервер) и occ-проверки (`PC_AGENT_NC_OCC` → `occ update:check` обновление ядра, `occ setupchecks` предупреждения) через `_occ_checks()`/`_run_occ()`; новые NC-алерты `nc-core-update`/`nc-warnings`. `NextcloudStatus` +9 полей, тест дополнен (26 тестов). `analyze`/`test`/`py_compile` чистые. occ требует доступа агента к docker (≈root, несовместимо с `DynamicUser`) — задокументировано в SERVER_DEPLOY.md §4.5. Не проверено вживую.
 - 2026-07-11 (ночь) — реальный WebSocket в `evs_controller.dart` (`web_socket_channel`); реальный RMS из микрофона в `waveform.dart` (пакет `record`); добавлен `GET /alerts` в `agent slim.py` (пользователь принёс файл в корень репо) + клиент (`AlertItem`, `AgentClient.alerts`, `MonitorController.alertsFor`, баннер в `computer_status_screen.dart`). Всё проверено только `flutter analyze`/`flutter test` — реального устройства и Android SDK на этой машине нет, пользователь отложил сборку APK. Следующий шаг: собрать/проверить на телефоне, когда будет машина с SDK.
+- 2026-07-13 — **iOS-адаптация под AltStore**: новый CI `.github/workflows/build-ios.yml` (macOS-раннер → `flutter create ios` на лету → патч Info.plist из `native/ios/Info-additions.plist` + iOS 15 min → `flutter build ios --no-codesign` → неподписанный `nexus-unsigned.ipa` в артефактах). Иконка под iOS: `background_color_ios: "#0B1120"` в `pubspec.yaml` (full-bleed под маску iOS, без пред-скругления). README: раздел «Сборка IPA в облаке», ограничения free-подписи (нет push/APNs, переустановка раз в 7 дней). Работа в этой сессии велась в облачном окружении Claude Code без Flutter SDK — сборка проверяется только запуском workflow в Actions. Обсуждается далее: правки формы добавления мониторинга + полей адреса, опция WoL из интернета через роутер. Ответ по порту WoL: UDP 9 (стандарт), на приёме порт неважен — magic-пакет ловит NIC на аппаратном уровне.
