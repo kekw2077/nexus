@@ -12,6 +12,7 @@ class ComputerFormResult {
     required this.port,
     this.mac,
     this.broadcast,
+    this.directSend = false,
     this.token,
     this.cpuThreshold,
     this.ramThreshold,
@@ -25,6 +26,7 @@ class ComputerFormResult {
   final int port;
   final String? mac;
   final String? broadcast;
+  final bool directSend;
   final String? token;
   final int? cpuThreshold;
   final int? ramThreshold;
@@ -45,6 +47,7 @@ abstract final class ComputerFormSheet {
     bool withMac = false,
     bool withToken = false,
     bool withBroadcast = false,
+    bool withDirectToggle = false,
     bool macOptional = false,
     int defaultPort = 8765,
     String? hostHelper,
@@ -64,6 +67,7 @@ abstract final class ComputerFormSheet {
           withMac: withMac,
           withToken: withToken,
           withBroadcast: withBroadcast,
+          withDirectToggle: withDirectToggle,
           macOptional: macOptional,
           defaultPort: defaultPort,
           hostHelper: hostHelper,
@@ -83,6 +87,7 @@ class _FormBody extends StatefulWidget {
     required this.withMac,
     required this.withToken,
     required this.withBroadcast,
+    required this.withDirectToggle,
     required this.macOptional,
     required this.defaultPort,
     required this.hostHelper,
@@ -96,6 +101,7 @@ class _FormBody extends StatefulWidget {
   final bool withMac;
   final bool withToken;
   final bool withBroadcast;
+  final bool withDirectToggle;
   final bool macOptional;
   final int defaultPort;
   final String? hostHelper;
@@ -118,11 +124,13 @@ class _FormBodyState extends State<_FormBody> {
   late final TextEditingController _diskThreshold;
   late final TextEditingController _tempThreshold;
   late final TextEditingController _ntfyTopic;
+  late bool _directSend;
 
   @override
   void initState() {
     super.initState();
     final i = widget.initial;
+    _directSend = i?.directSend ?? false;
     _name = TextEditingController(text: i?.name ?? '');
     _mac = TextEditingController(text: i?.mac ?? '');
     _broadcast = TextEditingController(text: i?.broadcast ?? '');
@@ -176,6 +184,7 @@ class _FormBodyState extends State<_FormBody> {
         port: int.parse(_port.text.trim()),
         mac: widget.withMac && macText.isNotEmpty ? normalizeMac(macText) : null,
         broadcast: widget.withBroadcast && broadcastText.isNotEmpty ? broadcastText : null,
+        directSend: widget.withDirectToggle && _directSend,
         token: widget.withToken ? _token.text : null,
         cpuThreshold: widget.withToken ? int.tryParse(_cpuThreshold.text.trim()) : null,
         ramThreshold: widget.withToken ? int.tryParse(_ramThreshold.text.trim()) : null,
@@ -270,6 +279,21 @@ class _FormBodyState extends State<_FormBody> {
                 ),
               ],
             ),
+            if (widget.withDirectToggle) ...[
+              const SizedBox(height: 6),
+              SwitchListTile(
+                value: _directSend,
+                onChanged: (v) => setState(() => _directSend = v),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Напрямую, минуя ретранслятор'),
+                subtitle: Text(
+                  'Для пробуждения из интернета (адрес — DDNS/публичный, '
+                  'порт — проброшенный на роутере). Иначе используется '
+                  'ретранслятор, если он включён.',
+                  style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ),
+            ],
             if (widget.withToken) ...[
               const SizedBox(height: 14),
               TextFormField(
