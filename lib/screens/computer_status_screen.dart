@@ -7,14 +7,20 @@ import '../models/alert_item.dart';
 import '../models/host_metrics.dart';
 import '../models/monitored_host.dart';
 import '../models/nextcloud_status.dart';
+import '../services/network_scanner.dart';
 import '../state/monitor_controller.dart';
 import '../state/settings_controller.dart';
 import '../widgets/computer_form_sheet.dart';
+import '../widgets/network_scan_sheet.dart';
 
 class ComputerStatusScreen extends StatelessWidget {
   const ComputerStatusScreen({super.key});
 
-  Future<void> _openForm(BuildContext context, {MonitoredHost? existing}) async {
+  Future<void> _openForm(
+    BuildContext context, {
+    MonitoredHost? existing,
+    ComputerFormResult? prefill,
+  }) async {
     final monitor = context.read<MonitorController>();
     final result = await ComputerFormSheet.show(
       context,
@@ -24,16 +30,18 @@ class ComputerStatusScreen extends StatelessWidget {
       submitLabel: existing == null ? 'Добавить' : 'Сохранить',
       withToken: true,
       withMac: true,
+      withBroadcast: true,
       macOptional: true,
       defaultPort: 8765,
       initial: existing == null
-          ? null
+          ? prefill
           : ComputerFormResult(
               name: existing.name,
               host: existing.host,
               port: existing.port,
               token: existing.token,
               mac: existing.mac,
+              broadcast: existing.broadcast,
               cpuThreshold: existing.alertCpu,
               ramThreshold: existing.alertRam,
               diskThreshold: existing.alertDisk,
@@ -43,7 +51,8 @@ class ComputerStatusScreen extends StatelessWidget {
     );
     if (result == null) return;
 
-    final broadcast = result.mac != null ? '255.255.255.255' : null;
+    // Broadcast нужен только вместе с MAC (для включения). Пусто → глобальный.
+    final broadcast = result.mac != null ? (result.broadcast ?? '255.255.255.255') : null;
     String hostId;
     if (existing == null) {
       monitor.add(
@@ -64,7 +73,7 @@ class ComputerStatusScreen extends StatelessWidget {
         port: result.port,
         token: result.token ?? '',
         mac: result.mac,
-        broadcast: result.mac != null ? (existing.broadcast ?? '255.255.255.255') : null,
+        broadcast: broadcast,
       );
       hostId = existing.id;
       _toast(context, '${result.name} сохранён');
@@ -89,6 +98,17 @@ class ComputerStatusScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _discover(BuildContext context) async {
+    final monitor = context.read<MonitorController>();
+    final known = {for (final h in monitor.hosts) h.host};
+    final picked = await NetworkScanSheet.show(context, defaultPort: 8765, knownHosts: known);
+    if (picked == null || !context.mounted) return;
+    await _openForm(
+      context,
+      prefill: ComputerFormResult(name: picked.label, host: picked.ip, port: picked.port),
+    );
+  }
+
   Future<void> _wake(BuildContext context, MonitoredHost host) async {
     final monitor = context.read<MonitorController>();
     final relay = context.read<SettingsController>().relay;
@@ -110,7 +130,7 @@ class ComputerStatusScreen extends StatelessWidget {
 
     return Scaffold(
       body: hosts.isEmpty
-          ? _Empty(onAdd: () => _openForm(context))
+          ? _Empty(onAdd: () => _openForm(context), onDiscover: () => _discover(context))
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 88),
               children: [
@@ -119,6 +139,11 @@ class ComputerStatusScreen extends StatelessWidget {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
+                      IconButton(
+                        onPressed: () => _discover(context),
+                        icon: const Icon(Icons.wifi_find),
+                        tooltip: 'Найти в сети',
+                      ),
                       IconButton(
                         onPressed: monitor.isRefreshing ? null : monitor.refresh,
                         icon: monitor.isRefreshing
@@ -537,8 +562,9 @@ class _SummaryCard extends StatelessWidget {
 }
 
 class _Empty extends StatelessWidget {
-  const _Empty({required this.onAdd});
+  const _Empty({required this.onAdd, required this.onDiscover});
   final VoidCallback onAdd;
+  final VoidCallback onDiscover;
 
   @override
   Widget build(BuildContext context) {
@@ -560,6 +586,12 @@ class _Empty extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             FilledButton(onPressed: onAdd, child: const Text('Добавить компьютер')),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: onDiscover,
+              icon: const Icon(Icons.wifi_find, size: 18),
+              label: const Text('Найти в сети'),
+            ),
           ],
         ),
       ),

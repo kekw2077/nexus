@@ -563,7 +563,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path == "/health":
-            self._json(200, {"status": "ok"})
+            # hostname — чтобы поиск в приложении показывал имя, а не голый IP.
+            # Без токена: имя хоста некритично, зато удобно при обнаружении.
+            self._json(200, {"status": "ok", "hostname": os.uname().nodename})
             return
 
         if not self._authorized():

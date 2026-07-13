@@ -16,8 +16,10 @@ class WakeOnLanScreen extends StatelessWidget {
     final result = await ComputerFormSheet.show(
       context,
       title: existing == null ? 'Добавить компьютер' : 'Изменить компьютер',
-      hostLabel: 'Broadcast',
-      hostHint: '192.168.1.255',
+      hostLabel: 'Broadcast / внешний адрес',
+      hostHint: '192.168.1.255 или host.duckdns.org',
+      hostHelper: 'Дома — broadcast подсети. Из интернета — DDNS/публичный адрес '
+          'и проброшенный на роутере порт (проброс на IP машины + статический ARP).',
       submitLabel: existing == null ? 'Добавить' : 'Сохранить',
       withMac: true,
       defaultPort: 9,

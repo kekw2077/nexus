@@ -27,10 +27,18 @@ class WolSender {
       for (var i = 0; i < 16; i++) ...macBytes,
     ]);
 
+    // Литеральный IP (broadcast подсети или публичный) — используем как есть.
+    // Не-IP (DDNS-имя для WoL из интернета) — резолвим в адрес.
+    final target = InternetAddress.tryParse(broadcast) ??
+        (await InternetAddress.lookup(broadcast)).firstWhere(
+          (a) => a.type == InternetAddressType.IPv4,
+          orElse: () => throw ArgumentError('Не удалось разрешить адрес: $broadcast'),
+        );
+
     final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
     try {
       socket.broadcastEnabled = true;
-      socket.send(packet, InternetAddress(broadcast), port);
+      socket.send(packet, target, port);
     } finally {
       socket.close();
     }
