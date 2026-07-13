@@ -200,6 +200,37 @@ POST /wake           -> {mac,broadcast,port}       — ретрансляция 
 исполняет присланное (`pc-agent-config.json` рядом с `agent slim.py`, путь
 переопределяется через `PC_AGENT_STATE_FILE`).
 
+### Агент на основном ПК (Windows) — `agent_pc.py`
+
+`agent slim.py` рассчитан на Linux (`/proc`, `statvfs`, `uname`). Для основного
+ПК на **Windows 11** в корне лежит `agent_pc.py` — тот же HTTP-контракт
+(health / metrics / alerts / alert-config / wake), но метрики читаются через
+WinAPI (`ctypes`), а температура/загрузка/VRAM видеокарты — через `nvidia-smi`
+(идёт с драйвером NVIDIA). Тоже **только стандартная библиотека**, ни pip, ни
+venv не нужны. Nextcloud-часть тут не запускается (её нет на ПК).
+
+Запуск в PowerShell:
+
+```powershell
+$env:PC_AGENT_TOKEN="ваш-токен"       # тот же токен вводится в карточке ПК
+python agent_pc.py                     # или pythonw agent_pc.py — без окна консоли
+```
+
+Автозапуск — через «Планировщик заданий» (триггер «При входе в систему»,
+действие `pythonw agent_pc.py`) или ярлык в `shell:startup`. Переменные
+(`PC_AGENT_PORT`, `PC_AGENT_DISK`, `PC_AGENT_ALERT_*`, `PC_AGENT_NTFY_URL` и
+т.д.) — как у Linux-агента. Открыть порт в брандмауэре Windows:
+
+```powershell
+New-NetFirewallRule -DisplayName "PC Agent" -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow
+```
+
+Особенности Windows: в поле `temperature` кладётся температура **GPU** (штатно
+получить температуру CPU без сторонних библиотек нельзя); дополнительно в
+`/metrics` отдаются `gpu`, `vramUsedBytes`, `vramTotalBytes` (текущий UI их пока
+не показывает). `loadAvg` пустой — в Windows его нет. Если NVIDIA-карты нет,
+`nvidia-smi` недоступен — метрики отдаются без температуры, остальное работает.
+
 ### Push-уведомления об алертах (опционально)
 
 Если на сервере задать `PC_AGENT_NTFY_URL` (адрес self-hosted ntfy) и в
