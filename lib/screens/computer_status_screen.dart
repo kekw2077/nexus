@@ -465,11 +465,16 @@ class _TempRow extends StatelessWidget {
         const SizedBox(width: 8),
         Text(label),
         const Spacer(),
-        Text(
-          '${value.toStringAsFixed(0)}°C',
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            color: value >= 70 ? warning : scheme.onSurface,
+        SizedBox(
+          width: 54,
+          child: Text(
+            '${value.toStringAsFixed(0)}°C',
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: value >= 70 ? warning : scheme.onSurface,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
           ),
         ),
       ],
@@ -577,12 +582,16 @@ class _MetricBar extends StatelessWidget {
               Text(note!, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11)),
             ],
             const Spacer(),
-            Text('$value%',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: hot ? warning : scheme.onSurface,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                )),
+            SizedBox(
+              width: 54,
+              child: Text('$value%',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: hot ? warning : scheme.onSurface,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  )),
+            ),
           ],
         ),
         const SizedBox(height: 6),
