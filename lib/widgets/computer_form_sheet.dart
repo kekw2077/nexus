@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../core/input_formatters.dart';
 import '../core/theme.dart';
 import '../core/validators.dart';
+import 'gradient.dart';
 
 class ComputerFormResult {
   ComputerFormResult({
@@ -278,10 +279,9 @@ class _FormBodyState extends State<_FormBody> {
             ),
             if (widget.withDirectToggle) ...[
               const SizedBox(height: 6),
-              SwitchListTile(
+              GradientSwitchTile(
                 value: _directSend,
                 onChanged: (v) => setState(() => _directSend = v),
-                contentPadding: EdgeInsets.zero,
                 title: const Text('Напрямую, минуя ретранслятор'),
                 subtitle: Text(
                   'Для пробуждения из интернета (адрес — DDNS/публичный, '
@@ -369,7 +369,7 @@ class _FormBodyState extends State<_FormBody> {
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: FilledButton(onPressed: _submit, child: Text(widget.submitLabel)),
+                  child: GradientButton(onPressed: _submit, label: Text(widget.submitLabel)),
                 ),
               ],
             ),

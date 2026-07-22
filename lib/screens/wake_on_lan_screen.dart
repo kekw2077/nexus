@@ -7,6 +7,7 @@ import '../models/wol_target.dart';
 import '../state/settings_controller.dart';
 import '../state/wol_controller.dart';
 import '../widgets/computer_form_sheet.dart';
+import '../widgets/gradient.dart';
 
 class WakeOnLanScreen extends StatelessWidget {
   const WakeOnLanScreen({super.key});
@@ -245,7 +246,7 @@ class _Empty extends StatelessWidget {
               style: TextStyle(color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 20),
-            FilledButton(onPressed: onAdd, child: const Text('Добавить компьютер')),
+            GradientButton(onPressed: onAdd, label: const Text('Добавить компьютер')),
           ],
         ),
       ),

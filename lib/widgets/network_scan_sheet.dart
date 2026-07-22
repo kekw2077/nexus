@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../core/theme.dart';
 import '../services/network_scanner.dart';
+import 'gradient.dart';
 
 /// Нижняя панель поиска машин в локальной сети. Сканирует подсеть на отклик
 /// агента и предлагает добавить найденный хост в мониторинг. Возвращает
@@ -178,9 +179,9 @@ class _NetworkScanSheetState extends State<NetworkScanSheet> {
                   visualDensity: VisualDensity.compact,
                   side: BorderSide(color: scheme.outlineVariant),
                 )
-              : FilledButton(
+              : GradientButton(
                   onPressed: () => Navigator.of(context).pop(host),
-                  child: const Text('Добавить'),
+                  label: const Text('Добавить'),
                 ),
         );
       },

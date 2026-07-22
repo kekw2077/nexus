@@ -10,6 +10,7 @@ import '../models/nextcloud_status.dart';
 import '../state/monitor_controller.dart';
 import '../state/settings_controller.dart';
 import '../widgets/computer_form_sheet.dart';
+import '../widgets/gradient.dart';
 import '../widgets/network_scan_sheet.dart';
 
 class ComputerStatusScreen extends StatelessWidget {
@@ -595,15 +596,7 @@ class _MetricBar extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: value / 100,
-            minHeight: 6,
-            backgroundColor: scheme.surfaceContainerHighest,
-            valueColor: AlwaysStoppedAnimation(hot ? warning : scheme.primary),
-          ),
-        ),
+        GradientBar(value: value / 100, hot: hot),
       ],
     );
   }
@@ -730,7 +723,7 @@ class _Empty extends StatelessWidget {
               style: TextStyle(color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 20),
-            FilledButton(onPressed: onAdd, child: const Text('Добавить компьютер')),
+            GradientButton(onPressed: onAdd, label: const Text('Добавить компьютер')),
             const SizedBox(height: 8),
             TextButton.icon(
               onPressed: onDiscover,

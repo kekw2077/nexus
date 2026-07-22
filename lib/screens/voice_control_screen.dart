@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../core/format.dart';
 import '../core/theme.dart';
 import '../state/evs_controller.dart';
+import '../widgets/gradient.dart';
 import '../widgets/waveform.dart';
 
 class VoiceControlScreen extends StatefulWidget {
@@ -173,7 +174,7 @@ class _EnableTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: SwitchListTile(
+      child: GradientSwitchTile(
         title: const Text('Голосовой ввод'),
         value: value,
         onChanged: onChanged,

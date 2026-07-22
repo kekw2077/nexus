@@ -10,6 +10,7 @@ import '../services/update_service.dart';
 import '../state/evs_controller.dart';
 import '../state/settings_controller.dart';
 import '../widgets/editable_field.dart';
+import '../widgets/gradient.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -125,9 +126,9 @@ class _EvsSection extends StatelessWidget {
             if (evs.status == EvsStatus.connected)
               TextButton(onPressed: evs.disconnect, child: const Text('Отключить'))
             else
-              FilledButton(
+              GradientButton(
                 onPressed: evs.status == EvsStatus.connecting ? null : evs.connect,
-                child: const Text('Подключить'),
+                label: const Text('Подключить'),
               ),
           ],
         ),
@@ -165,8 +166,7 @@ class _EvsSection extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
+        GradientSwitchTile(
           title: const Text('Подключаться при запуске'),
           value: evs.autoStart,
           onChanged: evs.setAutoStart,
@@ -190,15 +190,13 @@ class _RelaySection extends StatelessWidget {
           'из внешней сети. Обычно это ваш сервер.',
           style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
+        GradientSwitchTile(
           title: const Text('Использовать ретранслятор'),
           value: settings.relayEnabled,
           onChanged: (v) => settings.setRelay(enabled: v),
         ),
         if (settings.relayEnabled) ...[
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
+          GradientSwitchTile(
             title: const Text('HTTPS (публичный адрес)'),
             value: settings.relaySecure,
             onChanged: (v) => settings.setRelay(secure: v),
@@ -458,7 +456,7 @@ class _UpdateSectionState extends State<_UpdateSection> {
       if (Platform.isAndroid && info.hasApk)
         Align(
           alignment: Alignment.centerLeft,
-          child: FilledButton.icon(
+          child: GradientButton(
             onPressed: _downloadAndInstall,
             icon: const Icon(Icons.download, size: 18),
             label: const Text('Скачать и установить'),
