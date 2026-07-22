@@ -1,7 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 
 import '../core/theme.dart';
+import '../services/update_service.dart';
 import '../state/evs_controller.dart';
 import '../state/settings_controller.dart';
 import '../widgets/editable_field.dart';
@@ -19,6 +24,8 @@ class SettingsScreen extends StatelessWidget {
         _EvsSection(),
         SizedBox(height: 16),
         _RelaySection(),
+        SizedBox(height: 16),
+        _UpdateSection(),
         SizedBox(height: 16),
         _AboutSection(),
       ],
@@ -255,9 +262,215 @@ class _AboutSection extends StatelessWidget {
     return _SectionCard(
       title: 'О приложении',
       children: [
-        row('Версия', '0.1.0'),
+        FutureBuilder<PackageInfo>(
+          future: PackageInfo.fromPlatform(),
+          builder: (_, snap) => row('Версия', snap.hasData ? snap.data!.version : '…'),
+        ),
         row('Платформы', 'Android 7.0+, iOS'),
       ],
     );
+  }
+}
+
+/// Проверка и установка обновлений из GitHub Releases. Скачивание+установка —
+/// только Android (iOS обновляется через AltStore, там показываем ссылку).
+class _UpdateSection extends StatefulWidget {
+  const _UpdateSection();
+
+  @override
+  State<_UpdateSection> createState() => _UpdateSectionState();
+}
+
+enum _UpdateState { idle, checking, upToDate, available, downloading, error }
+
+class _UpdateSectionState extends State<_UpdateSection> {
+  final _service = UpdateService();
+  _UpdateState _state = _UpdateState.idle;
+  String _current = '…';
+  UpdateInfo? _update;
+  double _progress = 0;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _service.currentVersion().then((v) {
+      if (mounted) setState(() => _current = v);
+    });
+  }
+
+  @override
+  void dispose() {
+    _service.dispose();
+    super.dispose();
+  }
+
+  Future<void> _check() async {
+    setState(() {
+      _state = _UpdateState.checking;
+      _error = null;
+      _update = null;
+    });
+    try {
+      final info = await _service.checkForUpdate();
+      if (!mounted) return;
+      setState(() {
+        _update = info;
+        _state = info == null ? _UpdateState.upToDate : _UpdateState.available;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _state = _UpdateState.error;
+        _error = 'Не удалось проверить: $e';
+      });
+    }
+  }
+
+  Future<void> _downloadAndInstall() async {
+    final info = _update;
+    if (info?.apkUrl == null) return;
+    setState(() {
+      _state = _UpdateState.downloading;
+      _progress = 0;
+    });
+    try {
+      final path = await _service.downloadApk(
+        info!.apkUrl!,
+        onProgress: (p) {
+          if (mounted) setState(() => _progress = p);
+        },
+      );
+      if (!mounted) return;
+      setState(() => _state = _UpdateState.available);
+      // Открываем APK — система показывает установщик (нужно разрешение
+      // «Установка неизвестных приложений» для Nexus).
+      final result = await OpenFilex.open(path, type: 'application/vnd.android.package-archive');
+      if (result.type != ResultType.done && mounted) {
+        setState(() {
+          _state = _UpdateState.error;
+          _error = 'Не удалось открыть установщик: ${result.message}';
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _state = _UpdateState.error;
+        _error = 'Ошибка загрузки: $e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final children = <Widget>[
+      Row(
+        children: [
+          Text('Текущая версия', style: TextStyle(color: scheme.onSurfaceVariant)),
+          const Spacer(),
+          Text(_current, style: const TextStyle(fontWeight: FontWeight.w500)),
+        ],
+      ),
+      const SizedBox(height: 12),
+    ];
+
+    switch (_state) {
+      case _UpdateState.idle:
+        children.add(_checkButton('Проверить обновления'));
+      case _UpdateState.checking:
+        children.add(const Row(
+          children: [
+            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(width: 12),
+            Text('Проверяю…'),
+          ],
+        ));
+      case _UpdateState.upToDate:
+        children
+          ..add(Row(children: [
+            Icon(Icons.check_circle, color: Theme.of(context).extension<StatusColors>()!.success, size: 20),
+            const SizedBox(width: 8),
+            const Text('У вас последняя версия'),
+          ]))
+          ..add(const SizedBox(height: 12))
+          ..add(_checkButton('Проверить ещё раз'));
+      case _UpdateState.available:
+        children.addAll(_availableBody(scheme));
+      case _UpdateState.downloading:
+        children.addAll([
+          Text('Скачиваю ${(_progress * 100).round()}%'),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(value: _progress > 0 ? _progress : null, minHeight: 6),
+          ),
+        ]);
+      case _UpdateState.error:
+        children
+          ..add(Text(_error ?? 'Ошибка', style: TextStyle(color: scheme.error, fontSize: 13)))
+          ..add(const SizedBox(height: 12))
+          ..add(_checkButton('Повторить'));
+    }
+
+    return _SectionCard(title: 'Обновления', children: children);
+  }
+
+  Widget _checkButton(String label) => Align(
+        alignment: Alignment.centerLeft,
+        child: FilledButton.tonalIcon(
+          onPressed: _check,
+          icon: const Icon(Icons.system_update, size: 18),
+          label: Text(label),
+        ),
+      );
+
+  List<Widget> _availableBody(ColorScheme scheme) {
+    final info = _update!;
+    final sizeMb = info.apkSize > 0 ? ' · ${(info.apkSize / 1024 / 1024).toStringAsFixed(1)} МБ' : '';
+    return [
+      Row(
+        children: [
+          Icon(Icons.new_releases, color: scheme.primary, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('Доступна версия ${info.version}$sizeMb',
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+      if (info.notes.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          constraints: const BoxConstraints(maxHeight: 160),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: SingleChildScrollView(
+            child: Text(info.notes, style: const TextStyle(fontSize: 12.5)),
+          ),
+        ),
+      ],
+      const SizedBox(height: 12),
+      if (Platform.isAndroid && info.hasApk)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FilledButton.icon(
+            onPressed: _downloadAndInstall,
+            icon: const Icon(Icons.download, size: 18),
+            label: const Text('Скачать и установить'),
+          ),
+        )
+      else
+        Text(
+          Platform.isIOS
+              ? 'Обновление на iOS ставится через AltStore. Откройте страницу релиза:\n${info.pageUrl}'
+              : 'APK для этой версии не найден. Страница релиза:\n${info.pageUrl}',
+          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+        ),
+    ];
   }
 }

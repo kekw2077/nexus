@@ -54,7 +54,13 @@ jobs:
         run: flutter test
 
       - name: Сборка release APK
-        run: flutter build apk --release
+        # versionName берём из тега (без префикса v), versionCode — из номера
+        # запуска. Так внутренняя версия APK всегда совпадает с релизом, и
+        # встроенная проверка обновлений сравнивает одно и то же.
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          VERSION="${VERSION#v}"
+          flutter build apk --release --build-name="$VERSION" --build-number="${{ github.run_number }}"
 
       - name: Подготовить артефакт
         run: |

@@ -1,7 +1,9 @@
 name: evs_remote
 description: "Управление компьютерами в сети — Wake-on-LAN, мониторинг состояния, голосовой ввод EVS."
 publish_to: "none"
-version: 1.0.0+1
+# Согласовано с тегами GitHub Releases (v0.1.0). В CI versionName берётся из
+# тега (см. release.yml), поэтому проверка обновлений сравнивает одно и то же.
+version: 0.1.0+1
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -21,6 +23,10 @@ dependencies:
   firebase_core: ^4.11.0
   firebase_messaging: ^16.4.1
   flutter_local_notifications: ^22.0.1
+  # Обновление приложения из GitHub Releases (проверка версии, скачивание, установка APK)
+  package_info_plus: ^8.1.0
+  path_provider: ^2.1.4
+  open_filex: ^4.5.0
 
 dev_dependencies:
   flutter_test:
