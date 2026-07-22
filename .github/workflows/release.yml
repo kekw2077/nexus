@@ -1,0 +1,86 @@
+name: Release
+
+# Собирает release APK и публикует GitHub Release с этим APK.
+# Запуск вручную: Actions -> Release -> Run workflow, укажите тег (например v0.1.0).
+# Тег создаётся автоматически на текущем коммите ветки, из которой запущен workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Тег релиза (например v0.1.0)"
+        required: true
+        default: v0.1.0
+      prerelease:
+        description: "Пометить как pre-release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.6
+          cache: true
+
+      - run: flutter --version
+
+      - name: Восстановить google-services.json из секрета
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "::error::Секрет GOOGLE_SERVICES_JSON не задан (Settings -> Secrets and variables -> Actions)."
+            exit 1
+          fi
+          echo "$GOOGLE_SERVICES_JSON" | base64 -d > android/app/google-services.json
+
+      - run: flutter pub get
+
+      - name: Тесты
+        run: flutter test
+
+      - name: Сборка release APK
+        run: flutter build apk --release
+
+      - name: Подготовить артефакт
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/nexus-${{ github.event.inputs.version }}.apk"
+          ls -lh dist
+
+      - name: Опубликовать GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: Nexus ${{ github.event.inputs.version }}
+          prerelease: ${{ github.event.inputs.prerelease }}
+          generate_release_notes: true
+          files: dist/nexus-${{ github.event.inputs.version }}.apk
+          body: |
+            Мобильный компаньон **Nexus** — управление ПК в сети (Wake-on-LAN),
+            мониторинг состояния всех дисков и температур ЦП/ГП, голосовой ввод EVS.
+
+            ### Установка (Android)
+            Скачайте `nexus-${{ github.event.inputs.version }}.apk` и установите
+            сайдлоадом. APK подписан debug-ключом. Требуется Android 7.0+ (API 24).
+            Разрешите установку из неизвестных источников, если система попросит.
+
+            ### Агенты
+            Для мониторинга запустите агент на машинах: `agent slim.py` (Linux) или
+            `agent_pc.py` (Windows) из репозитория.
+
+            Полный список изменений — ниже.
