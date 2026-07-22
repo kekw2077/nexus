@@ -28,8 +28,8 @@ class SettingsController extends ChangeNotifier {
 
   final PrefsStore _store;
 
-  AppBrand _brand = AppBrand.discord;
-  ThemeMode _themeMode = ThemeMode.system;
+  AppBrand _brand = AppBrand.nexus;
+  ThemeMode _themeMode = ThemeMode.dark;
 
   bool _relayEnabled = false;
   String _relayHost = '';
@@ -58,13 +58,13 @@ class SettingsController extends ChangeNotifier {
     final brandName = _store.getString('settings.brand');
     _brand = AppBrand.values.firstWhere(
       (b) => b.name == brandName,
-      orElse: () => AppBrand.discord,
+      orElse: () => AppBrand.nexus,
     );
 
     final modeName = _store.getString('settings.themeMode');
     _themeMode = ThemeMode.values.firstWhere(
       (m) => m.name == modeName,
-      orElse: () => ThemeMode.system,
+      orElse: () => ThemeMode.dark,
     );
 
     _relayEnabled = _store.getBool('settings.relayEnabled') ?? false;
