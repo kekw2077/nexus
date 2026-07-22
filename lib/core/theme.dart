@@ -106,18 +106,22 @@ const monoFontFallback = ['SF Mono', 'Menlo', 'Roboto Mono', 'monospace'];
 
 ThemeData buildTheme(AppBrand brand, Brightness brightness) {
   final brandColors = _palettes[brand]!;
+
+  // Nexus — фирменная тёмная тема по макету: всегда тёмная, даже если система
+  // (или выбранная «Тема») светлая. Для остальных брендов светлая/тёмная — как есть.
+  final isNexus = brand == AppBrand.nexus;
+  final effectiveBrightness = isNexus ? Brightness.dark : brightness;
+
   var scheme = ColorScheme.fromSeed(
     seedColor: brandColors.primary,
-    brightness: brightness,
+    brightness: effectiveBrightness,
     primary: brandColors.primary,
   );
-
-  // Nexus в тёмном режиме — фирменные поверхности/акценты из макета.
-  if (brand == AppBrand.nexus && brightness == Brightness.dark) {
+  if (isNexus) {
     scheme = _nexusDark(scheme);
   }
 
-  final base = ThemeData(useMaterial3: true, colorScheme: scheme, brightness: brightness);
+  final base = ThemeData(useMaterial3: true, colorScheme: scheme, brightness: effectiveBrightness);
 
   return base.copyWith(
     scaffoldBackgroundColor: scheme.surface,

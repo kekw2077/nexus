@@ -464,18 +464,14 @@ class _TempRow extends StatelessWidget {
       children: [
         Icon(Icons.device_thermostat, size: 16, color: scheme.onSurfaceVariant),
         const SizedBox(width: 8),
-        Text(label),
-        const Spacer(),
-        SizedBox(
-          width: 54,
-          child: Text(
-            '${value.toStringAsFixed(0)}°C',
-            textAlign: TextAlign.right,
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              color: value >= 70 ? warning : scheme.onSurface,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
+        Expanded(child: Text(label)),
+        const SizedBox(width: 10),
+        Text(
+          '${value.toStringAsFixed(0)}°C',
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: value >= 70 ? warning : scheme.onSurface,
+            fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),
       ],
@@ -577,22 +573,18 @@ class _MetricBar extends StatelessWidget {
           children: [
             Icon(icon, size: 15, color: scheme.onSurfaceVariant),
             const SizedBox(width: 8),
-            Flexible(child: Text(label, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13), overflow: TextOverflow.ellipsis)),
+            Expanded(child: Text(label, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13), overflow: TextOverflow.ellipsis)),
             if (note != null) ...[
               const SizedBox(width: 8),
               Text(note!, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11)),
             ],
-            const Spacer(),
-            SizedBox(
-              width: 54,
-              child: Text('$value%',
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: hot ? warning : scheme.onSurface,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  )),
-            ),
+            const SizedBox(width: 10),
+            Text('$value%',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: hot ? warning : scheme.onSurface,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                )),
           ],
         ),
         const SizedBox(height: 6),
