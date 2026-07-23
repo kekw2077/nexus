@@ -140,6 +140,7 @@ class GradientBar extends StatelessWidget {
       borderRadius: radius,
       child: Container(
         height: height,
+        width: double.infinity,
         color: scheme.surfaceContainerHighest,
         child: FractionallySizedBox(
           alignment: Alignment.centerLeft,
